@@ -21,6 +21,7 @@ from .providers import (
     PROVIDER_ORDER,
     PROVIDERS,
     has_api_key,
+    is_placeholder_key,
     provider_meta,
     resolve_active_provider,
 )
@@ -183,9 +184,10 @@ def run_wizard(
     file_value = values.get(meta["env_key"], "")
     shell_value = os.getenv(meta["env_key"], "")
     existing = file_value or shell_value
+    placeholder = is_placeholder_key(existing)
 
     key: str = ""
-    if existing and not force:
+    if existing and not placeholder and not force:
         source = ".env" if file_value else "shell environment"
         _ok(
             f"{meta['env_key']} already set in {source} "
@@ -194,10 +196,19 @@ def run_wizard(
         _info("Pass --force if you want to replace it.")
         key = existing
     else:
+        if existing and placeholder:
+            _warn(
+                f"{meta['env_key']} contains a placeholder value "
+                f"({existing!r}) — that's not a real key. Let's set one."
+            )
         key = _prompt_api_key(provider)
-        if not key:
-            # Don't overwrite an existing key with empty.
+        if not key and not placeholder:
+            # Don't overwrite an existing real key with empty.
             key = existing
+        elif not key and placeholder:
+            # User skipped and the only thing on disk is the placeholder.
+            # Wipe it so future runs don't think we're configured.
+            key = ""
 
     values[meta["env_key"]] = key
     values["CVO_PROVIDER"] = provider

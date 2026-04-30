@@ -113,5 +113,30 @@ def make_client(provider: str, model: str | None = None) -> LLMClient:
     raise ValueError(provider)
 
 
+def is_placeholder_key(value: str | None) -> bool:
+    """
+    True if `value` looks like a placeholder copied from .env.example
+    (e.g. `sk-ant-...`, `sk-...`, `your-api-key-here`, `xxx`) rather than
+    a real API key. Treat those as "not configured".
+    """
+    if not value:
+        return True
+    v = value.strip().strip('"').strip("'").lower()
+    if not v:
+        return True
+    if "..." in v:
+        return True
+    placeholders = {
+        "sk-...", "sk-ant-...", "your-api-key-here", "your_api_key",
+        "changeme", "todo", "xxx", "xxxxx", "<your-key>",
+    }
+    if v in placeholders:
+        return True
+    if v.startswith("<") and v.endswith(">"):
+        return True
+    return False
+
+
 def has_api_key(provider: str) -> bool:
-    return bool(os.getenv(provider_meta(provider)["env_key"]))
+    """True only if the env var holds a real-looking API key."""
+    return not is_placeholder_key(os.getenv(provider_meta(provider)["env_key"]))
