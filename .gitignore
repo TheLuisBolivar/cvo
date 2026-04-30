@@ -1,0 +1,85 @@
+# ─── Secrets ──────────────────────────────────────────────────────────
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# ─── Personal data (CVs, parsed JSON, generated CVs) ──────────────────
+# These folders hold real candidate data — never commit their contents.
+data/pdfs/*
+data/json/*
+output/*
+# Keep the directory structure in git
+!data/pdfs/.gitkeep
+!data/json/.gitkeep
+!output/.gitkeep
+
+# Stray PDFs anywhere in the repo (extra safety net)
+*.pdf
+
+# ─── Python ───────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# ─── Virtual envs ─────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+.python-version
+
+# ─── Build artifacts ──────────────────────────────────────────────────
+build/
+dist/
+wheels/
+*.egg-info/
+*.egg
+.eggs/
+pip-wheel-metadata/
+
+# ─── Test / type-check / lint caches ──────────────────────────────────
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+.tox/
+.nox/
+.mypy_cache/
+.dmypy.json
+.pyre/
+.pytype/
+.ruff_cache/
+
+# ─── Notebooks ────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+
+# ─── IDEs / editors ───────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+*.bak
+*.tmp
+*~
+.history/
+
+# ─── OS ───────────────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ─── Logs ─────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ─── Tooling caches inside this repo ──────────────────────────────────
+.epsilon/

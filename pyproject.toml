@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cv-optimizer"
+version = "0.2.0"
+description = "Tailor your CV to a specific job offer using LLMs (Claude, ChatGPT, Gemini, DeepSeek)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "anthropic>=0.40.0",
+    "openai>=1.40.0",
+    "google-generativeai>=0.8.0",
+    "python-dotenv>=1.0.0",
+    "pypdf>=4.0.0",
+    "python-docx>=1.1.0",
+]
+
+[project.scripts]
+cvo = "cv_optimizer.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["cv_optimizer*"]
+exclude = ["examples*", "output*", ".venv*", ".git*"]

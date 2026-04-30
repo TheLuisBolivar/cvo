@@ -1,0 +1,86 @@
+{
+  "personal_info": {
+    "name": "Ana Martinez",
+    "current_title": "Senior Backend Engineer",
+    "email": "ana.martinez@email.com",
+    "phone": "+52 55 1234 5678",
+    "location": "Mexico City, Mexico",
+    "linkedin": "linkedin.com/in/anamartinez",
+    "github": "github.com/anamartinez",
+    "portfolio": ""
+  },
+  "summary": "Backend engineer with 7 years of experience building distributed services in fintech and e-commerce. Passionate about scalable systems and observability.",
+  "experiences": [
+    {
+      "company": "PagaYa",
+      "position": "Senior Backend Engineer",
+      "start_date": "March 2022",
+      "end_date": "Present",
+      "location": "Mexico City (remote)",
+      "description": "B2B payments platform processing ~10M tx/month. Team of 8 engineers.",
+      "achievements": [
+        "Led the migration of the Django monolith to Go microservices, reducing deploy time from 40min to 6min",
+        "Implemented transactional idempotency with Redis and PostgreSQL that eliminated duplicates (previously 0.3% of tx)",
+        "Designed an event pipeline with Kafka for real-time reconciliation, reducing operations incidents from 12 to 1 per month",
+        "Mentored 3 juniors, all 3 promoted to mid-level in less than a year",
+        "Migrated observability from StatsD to OpenTelemetry + Grafana"
+      ],
+      "technologies": ["Go", "Python", "Django", "PostgreSQL", "Redis", "Kafka", "Docker", "Kubernetes", "AWS", "OpenTelemetry", "Grafana"]
+    },
+    {
+      "company": "MercadoLibre",
+      "position": "Software Engineer",
+      "start_date": "January 2020",
+      "end_date": "February 2022",
+      "location": "Buenos Aires, Argentina",
+      "description": "Checkout team, part of Mercado Pago. Peak traffic ~50K rps.",
+      "achievements": [
+        "Built the new checkout API in Java/Spring serving 50K rps with p99 < 80ms",
+        "Implemented feature flags for gradual rollouts, allowing bug detection in 2% of traffic before full rollout",
+        "Refactored the installment calculation module, reducing user-reported computation errors by 70%",
+        "Participated in on-call rotations and authored 6 runbooks that halved mean time to resolution"
+      ],
+      "technologies": ["Java", "Spring", "Kotlin", "MySQL", "RabbitMQ", "AWS", "Datadog", "Jenkins"]
+    },
+    {
+      "company": "Globant",
+      "position": "Junior Developer",
+      "start_date": "June 2018",
+      "end_date": "December 2019",
+      "location": "Buenos Aires, Argentina",
+      "description": "Consulting, assigned to a US retail client.",
+      "achievements": [
+        "Developed REST endpoints in Python/Flask for product catalog",
+        "Wrote unit and integration tests, raising coverage from 40% to 80%",
+        "Automated report generation with cron jobs and SQL"
+      ],
+      "technologies": ["Python", "Flask", "PostgreSQL", "Git", "Jenkins"]
+    }
+  ],
+  "education": [
+    {
+      "degree": "B.S. in Computer Science",
+      "institution": "University of Buenos Aires",
+      "period": "2014 – 2018"
+    }
+  ],
+  "skills": {
+    "Languages": ["Go", "Python", "Java", "Kotlin", "SQL", "JavaScript"],
+    "Databases": ["PostgreSQL", "MySQL", "Redis", "DynamoDB"],
+    "Messaging": ["Kafka", "RabbitMQ", "SQS"],
+    "Cloud / DevOps": ["AWS", "Docker", "Kubernetes", "Terraform", "GitHub Actions"],
+    "Observability": ["OpenTelemetry", "Grafana", "Datadog", "Prometheus"]
+  },
+  "certifications": [
+    {
+      "name": "AWS Solutions Architect Associate",
+      "issuer": "Amazon Web Services",
+      "year": "2023"
+    }
+  ],
+  "languages": [
+    {"language": "Spanish", "level": "Native"},
+    {"language": "English", "level": "C1 - Advanced"},
+    {"language": "Portuguese", "level": "B1 - Intermediate"}
+  ]
+}

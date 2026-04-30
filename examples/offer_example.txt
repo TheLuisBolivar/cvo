@@ -1,0 +1,36 @@
+Staff Backend Engineer — Payments Platform
+Company: Kushki (LATAM Fintech)
+Mode: Remote from LATAM
+
+About the role
+We're looking for a Staff Backend Engineer to technically lead our core transactional processing platform. You'll work with a distributed team across 6 countries processing more than 100 million transactions per month across 9 LATAM markets.
+
+Responsibilities
+- Design and lead the architectural evolution of mission-critical services (event-driven, microservices).
+- Set observability, performance, and resilience standards across the platform.
+- Mentor senior engineers and actively participate in hiring.
+- Drive technical RFCs and align stakeholders on platform decisions.
+- Technical owner of payment-service SLOs (p99 latency, availability).
+- Lead severity-1 incidents and blameless postmortems.
+
+Must-have requirements
+- 7+ years of backend experience at high scale.
+- Proven experience with Go or Java in high-concurrency production systems.
+- Deep PostgreSQL knowledge (modeling, partitioning, tuning).
+- Experience with event-driven systems (Kafka ideally).
+- Production Kubernetes experience.
+- Experience designing APIs (REST and gRPC).
+- Intermediate-advanced English (engineering works in English).
+
+Nice to have
+- Prior fintech / payments experience (idempotency, reconciliation, PCI DSS).
+- Experience with OpenTelemetry, Prometheus, distributed tracing.
+- Open-source contributions.
+- Experience with Terraform / IaC.
+- Prior technical leadership (staff/principal/tech lead).
+
+What we offer
+- Competitive USD salary.
+- Stock options.
+- 100% remote work and flexible hours.
+- International team and high-impact regional projects.
