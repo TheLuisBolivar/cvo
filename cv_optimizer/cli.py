@@ -54,6 +54,7 @@ from . import (
 )
 from .client import _extract_json
 from .deepseek_client import DEFAULT_DEEPSEEK_MODEL
+from .interactive import select
 from .providers import LLMClient, PROVIDER_ORDER
 from .prompts import (
     ALIGNER_PROMPT,
@@ -174,25 +175,14 @@ def _pick_data_file(jsons: list[Path], pdfs: list[Path]) -> tuple[Path | None, P
         info(f"Auto-detected single CV: {p}")
         return (p, None) if kind == "json" else (None, p)
 
-    print()
-    print(bold("Found multiple CVs in data/. Pick one:"))
-    for i, (kind, p) in enumerate(items, start=1):
-        print(f"  {i}) [{kind.upper():4}] {p}")
-    print(f"  q) cancel")
-    print()
-    while True:
-        try:
-            raw = input(f"Pick 1-{len(items)} [1]: ").strip()
-        except EOFError:
-            return None, None
-        if raw.lower() in ("q", "quit", "exit"):
-            return None, None
-        if not raw:
-            raw = "1"
-        if raw.isdigit() and 1 <= int(raw) <= len(items):
-            kind, p = items[int(raw) - 1]
-            return (p, None) if kind == "json" else (None, p)
-        warn("Invalid choice.")
+    choices: list[tuple[str, tuple[str, Path]]] = [
+        (f"[{kind.upper():4}] {p}", (kind, p)) for kind, p in items
+    ]
+    picked = select("Found multiple CVs in data/. Pick one:", choices, default=items[0])
+    if picked is None:
+        return None, None
+    kind, p = picked
+    return (p, None) if kind == "json" else (None, p)
 
 
 # ──────────────────────────────────────────────────────────────────────

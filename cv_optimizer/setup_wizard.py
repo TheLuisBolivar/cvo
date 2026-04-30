@@ -11,11 +11,11 @@ exposed as `cvo setup` for explicit re-runs.
 
 from __future__ import annotations
 
-import getpass
 import os
 import sys
 from pathlib import Path
 
+from .interactive import secret, select
 from .providers import (
     PROVIDER_ORDER,
     PROVIDERS,
@@ -111,27 +111,18 @@ def _write_env_file(path: Path, values: dict[str, str]) -> None:
 # ──────────────────────────────────────────────────────────────────────
 # Wizard
 # ──────────────────────────────────────────────────────────────────────
-def _prompt_provider_choice() -> str:
-    print()
-    print(_bold("Choose an LLM provider:"))
-    for i, p in enumerate(PROVIDER_ORDER, start=1):
+def _prompt_provider_choice() -> str | None:
+    """Arrow-key menu (with numbered fallback) to pick a provider."""
+    choices: list[tuple[str, str]] = []
+    for p in PROVIDER_ORDER:
         meta = PROVIDERS[p]
-        marker = _green(" (configured)") if has_api_key(p) else _dim(" (not configured)")
-        print(f"  {i}) {meta['display_name']}{marker}")
-    print()
-
-    while True:
-        try:
-            raw = input("Pick 1-4 [1]: ").strip()
-        except EOFError:
-            raw = ""
-        if not raw:
-            return PROVIDER_ORDER[0]
-        if raw.isdigit() and 1 <= int(raw) <= len(PROVIDER_ORDER):
-            return PROVIDER_ORDER[int(raw) - 1]
-        if raw.lower() in PROVIDER_ORDER:
-            return raw.lower()
-        _warn("Invalid choice. Type 1, 2, 3 or 4.")
+        marker = "  ✓ configured" if has_api_key(p) else "  · not configured"
+        choices.append((f"{meta['display_name']}{marker}", p))
+    return select(
+        "Choose an LLM provider:",
+        choices,
+        default=PROVIDER_ORDER[0],
+    )
 
 
 def _prompt_api_key(provider: str) -> str:
@@ -140,20 +131,14 @@ def _prompt_api_key(provider: str) -> str:
     print(_bold(f"API key for {meta['display_name']}"))
     print(_dim(f"   Get one at: {meta['key_url']}"))
     print(_dim("   The key is hidden as you type and stored in .env (gitignored)."))
-    while True:
-        try:
-            key = getpass.getpass("Paste API key (or press Enter to skip): ").strip()
-        except (KeyboardInterrupt, EOFError):
-            print()
-            _warn("Skipping key entry.")
-            return ""
-        if not key:
-            _warn("No key entered. You can re-run `cvo setup` later.")
-            return ""
-        # Trivial sanity check — most provider keys are 30+ chars.
-        if len(key) < 16:
-            _warn("That looks short for an API key. Continuing anyway.")
-        return key
+    key = secret("Paste API key (Enter to skip):")
+    if not key:
+        _warn("No key entered. You can re-run `cvo setup` later.")
+        return ""
+    # Trivial sanity check — most provider keys are 30+ chars.
+    if len(key) < 16:
+        _warn("That looks short for an API key. Continuing anyway.")
+    return key
 
 
 def run_wizard(
@@ -178,6 +163,9 @@ def run_wizard(
     print(_dim("   its API key in .env (gitignored, never committed)."))
 
     provider = preselected_provider or _prompt_provider_choice()
+    if not provider:
+        _warn("No provider selected. Aborting.")
+        raise KeyboardInterrupt
     meta = provider_meta(provider)
     _info(f"Selected: {meta['display_name']}")
 
