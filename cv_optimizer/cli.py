@@ -52,6 +52,7 @@ from . import (
     resolve_active_provider,
     run_wizard,
 )
+from .banner import print_banner
 from .client import _extract_json
 from .deepseek_client import DEFAULT_DEEPSEEK_MODEL
 from .interactive import select
@@ -322,7 +323,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    print(bold(magenta("\n  cvo · cv-optimizer\n")))
+    print_banner(subtitle="cv-optimizer · ready to align")
     info(f"Mode:           {'quiet' if args.quiet else 'live (streaming)'}")
     info(f"Provider:       {meta['display_name']}  (model: {chosen_model})")
     info(f"Output formats: {', '.join(formats)}")

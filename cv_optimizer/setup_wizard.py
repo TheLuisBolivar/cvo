@@ -15,6 +15,7 @@ import os
 import sys
 from pathlib import Path
 
+from .banner import mask_key, print_banner
 from .interactive import secret, select
 from .providers import (
     PROVIDER_ORDER,
@@ -171,11 +172,20 @@ def run_wizard(
 
     env_path = _project_env_path()
     values = _read_env_file(env_path)
+    initial_values = dict(values)
 
-    existing = values.get(meta["env_key"]) or os.getenv(meta["env_key"], "")
+    file_value = values.get(meta["env_key"], "")
+    shell_value = os.getenv(meta["env_key"], "")
+    existing = file_value or shell_value
+
     key: str = ""
     if existing and not force:
-        _ok(f"{meta['env_key']} already set — keeping existing value.")
+        source = ".env" if file_value else "shell environment"
+        _ok(
+            f"{meta['env_key']} already set in {source} "
+            f"({mask_key(existing)}) — keeping existing value."
+        )
+        _info("Pass --force if you want to replace it.")
         key = existing
     else:
         key = _prompt_api_key(provider)
@@ -185,8 +195,13 @@ def run_wizard(
 
     values[meta["env_key"]] = key
     values["CVO_PROVIDER"] = provider
-    _write_env_file(env_path, values)
-    _ok(f"Wrote .env at: {env_path}")
+
+    # Only touch .env if something actually changed.
+    if values != initial_values or not env_path.exists():
+        _write_env_file(env_path, values)
+        _ok(f"Wrote .env at: {env_path}")
+    else:
+        _info(".env unchanged — nothing to write.")
 
     # Make the new values available to the current process so `cvo run`
     # can continue immediately after the wizard.
@@ -194,7 +209,12 @@ def run_wizard(
         os.environ[meta["env_key"]] = key
     os.environ["CVO_PROVIDER"] = provider
 
-    print()
+    # Cool banner when everything is good to go.
+    if key:
+        print_banner(subtitle=f"{meta['display_name']} configured · run `cvo run --offer …`")
+    else:
+        print()
+
     return provider
 
 
