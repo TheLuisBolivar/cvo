@@ -38,14 +38,17 @@ except ImportError:
 _CVO_STYLE = (
     _QStyle(
         [
-            ("qmark",       "fg:#bd93f9 bold"),       # the leading "?"
-            ("question",    "bold"),                  # the prompt text
-            ("answer",      "fg:#bd93f9 bold"),       # final selected answer
-            ("pointer",     "fg:#ff79c6 bold"),       # ❯ pointer
-            ("highlighted", "fg:#ff79c6 bold"),       # highlighted choice (no bg)
-            ("selected",    "fg:#bd93f9 bold"),       # selected radio/check
+            # Cursor highlight: bold magenta text, NO background bar.
+            # `bg:default` + `noreverse` strips questionary's default reverse
+            # video that produces the purple bar.
+            ("highlighted", "fg:#ff79c6 bold bg:default noreverse"),
+            ("pointer",     "fg:#ff79c6 bold bg:default noreverse"),
+            ("qmark",       "fg:#bd93f9 bold"),
+            ("question",    "bold"),
+            ("answer",      "fg:#bd93f9 bold"),
+            ("selected",    "fg:#bd93f9 bold bg:default noreverse"),
             ("separator",   "fg:#6272a4"),
-            ("instruction", "fg:#6272a4 italic"),     # right-side hint
+            ("instruction", "fg:#6272a4 italic"),
             ("text",        ""),
             ("disabled",    "fg:#858585 italic"),
         ]
