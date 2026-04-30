@@ -9,14 +9,17 @@
 # These folders hold real candidate data — never commit their contents.
 data/pdfs/*
 data/json/*
+data/docx/*
 output/*
 # Keep the directory structure in git
 !data/pdfs/.gitkeep
 !data/json/.gitkeep
+!data/docx/.gitkeep
 !output/.gitkeep
 
-# Stray PDFs anywhere in the repo (extra safety net)
+# Stray PDFs / DOCX anywhere in the repo (extra safety net)
 *.pdf
+*.docx
 
 # ─── Python ───────────────────────────────────────────────────────────
 __pycache__/

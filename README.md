@@ -69,12 +69,19 @@ cvo setup                             # interactive provider + key wizard
 
 | Folder        | Purpose                                                        |
 | ------------- | -------------------------------------------------------------- |
-| `data/pdfs/`  | Drop your CV PDFs here (input). **Gitignored.**                |
-| `data/json/`  | Parsed CV JSONs land here (input or processed). **Gitignored.**|
+| `data/pdfs/`  | CV PDFs (input). **Gitignored.**                               |
+| `data/docx/`  | CV .docx files (input). **Gitignored.**                        |
+| `data/json/`  | Parsed CV JSONs (input or processed). **Gitignored.**          |
 | `output/`     | Optimized CVs and reports. **Gitignored.**                     |
 
-If you run `cvo run --offer offer.txt` without `--pdf` or `--cv`, the CLI
-auto-detects CVs in `data/json/` and `data/pdfs/` and lets you pick.
+You can pass any CV path with `--pdf`, `--docx`, or `--cv`; whatever lives
+outside `data/` is **automatically copied** into the right subfolder
+(`data/pdfs/`, `data/docx/`, `data/json/`). On a name clash with different
+content, the copy gets a timestamp suffix instead of overwriting.
+
+If you run `cvo run --offer offer.txt` without an input flag, the CLI
+auto-detects CVs in `data/json/`, `data/pdfs/`, and `data/docx/` and lets
+you pick.
 
 ## Usage
 

@@ -8,8 +8,9 @@ Subcommands:
 
 Examples:
     cvo run --offer offer.txt                     # auto-detect CV in data/
-    cvo run --pdf my_cv.pdf --offer offer.txt
-    cvo run --cv examples/cv_example.json --offer examples/offer_example.txt
+    cvo run --pdf  my_cv.pdf  --offer offer.txt   # any path; copied to data/pdfs/
+    cvo run --docx my_cv.docx --offer offer.txt   # any path; copied to data/docx/
+    cvo run --cv   examples/cv_example.json --offer examples/offer_example.txt
     cvo run --offer offer.txt --provider gemini --format pdf,docx
     cvo run --pdf my_cv.pdf --offer offer.txt --quiet
     cvo parse-pdf --pdf my_cv.pdf
@@ -45,6 +46,7 @@ from . import (
     generate_summary,
     has_api_key,
     make_client,
+    parse_docx_to_cv,
     parse_format_list,
     parse_pdf_to_cv,
     provider_meta,
@@ -52,6 +54,7 @@ from . import (
     resolve_active_provider,
     run_wizard,
 )
+from .docx_parser import extract_docx_text
 from .banner import print_banner
 from .client import _extract_json
 from .deepseek_client import DEFAULT_DEEPSEEK_MODEL
@@ -153,46 +156,116 @@ def _stream_text(client: LLMClient, prompt: str, system: str, label: str, max_to
 
 
 # ──────────────────────────────────────────────────────────────────────
-# Auto-detect existing CVs in data/
+# Data folder layout + copy logic
 # ──────────────────────────────────────────────────────────────────────
-def _list_data_files() -> tuple[list[Path], list[Path]]:
-    json_dir = Path("data/json")
-    pdf_dir = Path("data/pdfs")
-    jsons = sorted(json_dir.glob("*.json")) if json_dir.is_dir() else []
-    pdfs = sorted(pdf_dir.glob("*.pdf")) if pdf_dir.is_dir() else []
-    return jsons, pdfs
+DATA_DIRS: dict[str, Path] = {
+    "json": Path("data/json"),
+    "pdf":  Path("data/pdfs"),
+    "docx": Path("data/docx"),
+}
 
 
-def _pick_data_file(jsons: list[Path], pdfs: list[Path]) -> tuple[Path | None, Path | None]:
+def _list_data_files() -> dict[str, list[Path]]:
+    """Return {kind: sorted file list} for json / pdf / docx."""
+    return {
+        "json": sorted(DATA_DIRS["json"].glob("*.json")) if DATA_DIRS["json"].is_dir() else [],
+        "pdf":  sorted(DATA_DIRS["pdf"].glob("*.pdf"))   if DATA_DIRS["pdf"].is_dir()  else [],
+        "docx": sorted(DATA_DIRS["docx"].glob("*.docx")) if DATA_DIRS["docx"].is_dir() else [],
+    }
+
+
+def _pick_data_file(found: dict[str, list[Path]]) -> tuple[str, Path] | None:
     """
-    Returns (cv_json, pdf) — exactly one will be set. None means abort.
-    JSON has priority because it skips the PDF parsing step.
+    Show a picker. JSON gets priority (no re-parse). Returns (kind, path) or None.
     """
-    items: list[tuple[str, Path]] = [("json", p) for p in jsons] + [("pdf", p) for p in pdfs]
+    items: list[tuple[str, Path]] = (
+        [("json", p) for p in found["json"]]
+        + [("pdf",  p) for p in found["pdf"]]
+        + [("docx", p) for p in found["docx"]]
+    )
     if not items:
-        return None, None
+        return None
     if len(items) == 1:
         kind, p = items[0]
         info(f"Auto-detected single CV: {p}")
-        return (p, None) if kind == "json" else (None, p)
+        return kind, p
 
     choices: list[tuple[str, tuple[str, Path]]] = [
         (f"[{kind.upper():4}] {p}", (kind, p)) for kind, p in items
     ]
-    picked = select("Found multiple CVs in data/. Pick one:", choices, default=items[0])
-    if picked is None:
-        return None, None
-    kind, p = picked
-    return (p, None) if kind == "json" else (None, p)
+    return select("Found multiple CVs in data/. Pick one:", choices, default=items[0])
+
+
+def _ensure_in_data_folder(input_path: Path, kind: str) -> Path:
+    """
+    Copy `input_path` into `data/<kind>/` so all CVs we work with live in
+    the project. Returns the path that should be used downstream:
+      - same path, if it's already inside the right folder.
+      - the new copy's path otherwise.
+
+    On filename collision with different content, appends a timestamp
+    instead of overwriting.
+    """
+    target_dir = DATA_DIRS[kind]
+    target_dir.mkdir(parents=True, exist_ok=True)
+
+    abs_input = input_path.resolve()
+    abs_target_dir = target_dir.resolve()
+
+    # Already inside data/<kind>/ → no copy needed.
+    try:
+        if abs_input.parent == abs_target_dir:
+            return input_path
+    except OSError:
+        pass
+
+    target = target_dir / input_path.name
+    if target.exists():
+        # Same name already in data/. If contents match, just reuse it.
+        try:
+            if target.resolve() == abs_input or _files_equal(target, input_path):
+                return target
+        except OSError:
+            pass
+        # Different content → keep both, suffix the new one with a timestamp.
+        from datetime import datetime
+        stem, suffix = target.stem, target.suffix
+        target = target_dir / f"{stem}_{datetime.now().strftime('%Y%m%d_%H%M%S')}{suffix}"
+
+    import shutil
+    shutil.copy2(input_path, target)
+    info(f"Copied CV → {target}")
+    return target
+
+
+def _files_equal(a: Path, b: Path, chunk: int = 65536) -> bool:
+    if a.stat().st_size != b.stat().st_size:
+        return False
+    with a.open("rb") as fa, b.open("rb") as fb:
+        while True:
+            ca, cb = fa.read(chunk), fb.read(chunk)
+            if ca != cb:
+                return False
+            if not ca:
+                return True
 
 
 # ──────────────────────────────────────────────────────────────────────
 # Live pipeline phases
 # ──────────────────────────────────────────────────────────────────────
-def _run_pdf_phase_live(pdf_path: Path, parser_client: LLMClient, intermediate_json: Path, idx: int, total: int, provider_label: str) -> dict[str, Any]:
-    section(f"Parse PDF → CV JSON  ({provider_label} · {parser_client.model})", idx, total)
-    info(f"Reading: {pdf_path}")
-    text = extract_pdf_text(pdf_path)
+def _run_parser_phase_live(
+    input_path: Path,
+    kind: str,
+    parser_client: LLMClient,
+    intermediate_json: Path,
+    idx: int,
+    total: int,
+    provider_label: str,
+) -> dict[str, Any]:
+    label = "PDF" if kind == "pdf" else "DOCX"
+    section(f"Parse {label} → CV JSON  ({provider_label} · {parser_client.model})", idx, total)
+    info(f"Reading: {input_path}")
+    text = extract_pdf_text(input_path) if kind == "pdf" else extract_docx_text(input_path)
     ok(f"Extracted {len(text)} chars of raw text")
 
     info("Streaming structured CV JSON from the model…")
@@ -310,16 +383,27 @@ def cmd_run(args: argparse.Namespace) -> int:
     except ValueError as e:
         err(str(e)); return 2
 
-    # ── Auto-detect CV if not provided ──
-    if not args.pdf and not args.cv:
-        jsons, pdfs = _list_data_files()
-        cv_json, cv_pdf = _pick_data_file(jsons, pdfs)
-        if cv_json is None and cv_pdf is None:
-            err("No CV provided and none found in data/json/ or data/pdfs/."); return 1
-        if cv_json:
-            args.cv = str(cv_json)
-        else:
-            args.pdf = str(cv_pdf)
+    # ── Resolve input: explicit flag, or auto-detect in data/ ──
+    explicit = [(k, getattr(args, k)) for k in ("pdf", "docx", "cv") if getattr(args, k)]
+    if len(explicit) > 1:
+        err("Pass only one of --pdf / --docx / --cv."); return 2
+    input_kind: str | None = None
+    input_path: Path | None = None
+    if explicit:
+        flag, value = explicit[0]
+        input_kind = "json" if flag == "cv" else flag
+        input_path = Path(value)
+        if not input_path.exists():
+            err(f"{flag.upper()} not found: {input_path}"); return 1
+    else:
+        picked = _pick_data_file(_list_data_files())
+        if picked is None:
+            err("No CV provided and none found in data/json/, data/pdfs/, or data/docx/."); return 1
+        input_kind, input_path = picked
+
+    # Copy input into data/<kind>/ if it lives outside the project.
+    input_path = _ensure_in_data_folder(input_path, input_kind)
+    needs_parsing = input_kind in ("pdf", "docx")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -328,45 +412,44 @@ def cmd_run(args: argparse.Namespace) -> int:
     info(f"Provider:       {meta['display_name']}  (model: {chosen_model})")
     info(f"Output formats: {', '.join(formats)}")
 
-    # ── Pick the parser client for PDFs ──
-    # Preference: dedicated DeepSeek if a key is set (cheaper), else the
-    # active provider. The user can override with --pdf-provider.
+    # ── Pick the parser client when we need to parse PDF/DOCX ──
     parser_client: LLMClient | None = None
     parser_label: str = provider_label
-    if args.pdf:
+    if needs_parsing:
         pdf_provider = args.pdf_provider
         if not pdf_provider:
             pdf_provider = "deepseek" if has_api_key("deepseek") else provider
         if not has_api_key(pdf_provider):
             err(
-                f"--pdf requires an API key for {pdf_provider}. "
+                f"Parsing {input_kind.upper()} requires an API key for {pdf_provider}. "
                 f"Set {provider_meta(pdf_provider)['env_key']} (re-run `cvo setup` "
                 f"and pick {pdf_provider}), or pass --pdf-provider."
             ); return 1
         parser_model = args.deepseek_model if pdf_provider == "deepseek" else None
         parser_client = make_client(pdf_provider, parser_model)
         parser_label = provider_meta(pdf_provider)["display_name"].split(" ")[0]
-        info(f"PDF parser:     {provider_meta(pdf_provider)['display_name']}  (model: {parser_client.model})")
+        info(f"Doc parser:     {provider_meta(pdf_provider)['display_name']}  (model: {parser_client.model})")
 
-    # ── Load CV (PDF or JSON) ──
-    if args.pdf:
-        pdf_path = Path(args.pdf)
-        if not pdf_path.exists():
-            err(f"PDF not found: {pdf_path}"); return 1
-        intermediate = Path("data/json") / (pdf_path.stem + ".json") if Path("data/json").is_dir() else output_path.with_name(pdf_path.stem + ".json")
+    # ── Load CV ──
+    if needs_parsing:
+        intermediate = DATA_DIRS["json"] / (input_path.stem + ".json")
+        intermediate.parent.mkdir(parents=True, exist_ok=True)
         if args.quiet:
-            info(f"Parsing PDF → JSON ({parser_client.model})…")  # type: ignore[union-attr]
-            cv_dict = parse_pdf_to_cv(pdf_path, parser_client, output_path=intermediate)  # type: ignore[arg-type]
+            info(f"Parsing {input_kind.upper()} → JSON ({parser_client.model})…")
+            if input_kind == "pdf":
+                cv_dict = parse_pdf_to_cv(input_path, parser_client, output_path=intermediate)
+            else:
+                cv_dict = parse_docx_to_cv(input_path, parser_client, output_path=intermediate)
             ok(f"Saved intermediate JSON to: {intermediate}")
         else:
-            cv_dict = _run_pdf_phase_live(pdf_path, parser_client, intermediate, 1, _total_phases(args), parser_label)  # type: ignore[arg-type]
+            cv_dict = _run_parser_phase_live(
+                input_path, input_kind, parser_client, intermediate,
+                1, _total_phases(needs_parsing), parser_label,
+            )
         cv = CV.from_dict(cv_dict)
     else:
-        cv_path = Path(args.cv)
-        if not cv_path.exists():
-            err(f"CV JSON not found: {cv_path}"); return 1
-        info(f"Loading CV from {cv_path}")
-        cv = CV.from_json_file(cv_path)
+        info(f"Loading CV from {input_path}")
+        cv = CV.from_json_file(input_path)
         ok(f"CV loaded: {len(cv.experiences)} experience(s)")
 
     info(f"Reading offer: {offer_path}")
@@ -392,9 +475,9 @@ def cmd_run(args: argparse.Namespace) -> int:
         skills = reorder_skills(cv, analysis, main_client)
         ok("Skills reordered")
     else:
-        total_phases = _total_phases(args)
-        next_idx = 2 if args.pdf else 1
-        if not args.pdf:
+        total_phases = _total_phases(needs_parsing)
+        next_idx = 2 if needs_parsing else 1
+        if not needs_parsing:
             section("Load CV from JSON", 1, total_phases)
             ok(f"Loaded: {len(cv.experiences)} experience(s)")
         analysis = _run_analyzer_phase_live(offer_text, main_client, next_idx, total_phases, provider_label); next_idx += 1
@@ -436,8 +519,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
-def _total_phases(args: argparse.Namespace) -> int:
-    return 6 if args.pdf else 5
+def _total_phases(needs_parsing: bool) -> int:
+    return 6 if needs_parsing else 5
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -512,8 +595,9 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Run the full pipeline. Streams output by default; pass --quiet for scripted runs.",
     )
     src = p_run.add_mutually_exclusive_group(required=False)
-    src.add_argument("--pdf", help="Path to a CV PDF (parsed to JSON first)")
-    src.add_argument("--cv",  help="Path to a CV JSON (skip the PDF phase)")
+    src.add_argument("--pdf",  help="Path to a CV PDF (parsed to JSON first)")
+    src.add_argument("--docx", help="Path to a CV .docx (parsed to JSON first)")
+    src.add_argument("--cv",   help="Path to a CV JSON (skip the parsing phase)")
     p_run.add_argument("--offer", required=True, help="Path to the job offer (.txt or .md)")
     p_run.add_argument("--output", default="output/cv_optimized.md", help="Path for the optimized CV (default: output/cv_optimized.md)")
     p_run.add_argument("--report", default=None, help="Path for the alignment report (default: alongside --output)")

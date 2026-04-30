@@ -20,6 +20,7 @@ from .summary import generate_summary, reorder_skills
 from .generator import generate_markdown, generate_report, build_optimized_cv_dict
 from .exporters import export_all, parse_format_list, SUPPORTED_FORMATS
 from .pdf_parser import parse_pdf_to_cv, extract_pdf_text, text_to_cv_json
+from .docx_parser import parse_docx_to_cv, extract_docx_text
 from .setup_wizard import run_wizard, ensure_provider_configured
 
 __all__ = [
@@ -50,6 +51,8 @@ __all__ = [
     "parse_pdf_to_cv",
     "extract_pdf_text",
     "text_to_cv_json",
+    "parse_docx_to_cv",
+    "extract_docx_text",
     "run_wizard",
     "ensure_provider_configured",
 ]
