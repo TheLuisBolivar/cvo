@@ -24,10 +24,35 @@ from typing import Any
 
 try:
     import questionary  # type: ignore
+    from questionary import Style as _QStyle  # type: ignore
     _HAVE_QUESTIONARY = True
 except ImportError:
     questionary = None  # type: ignore
+    _QStyle = None  # type: ignore
     _HAVE_QUESTIONARY = False
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Theme — Claude-like: soft magenta highlight, bold, no harsh background
+# ──────────────────────────────────────────────────────────────────────
+_CVO_STYLE = (
+    _QStyle(
+        [
+            ("qmark",       "fg:#bd93f9 bold"),       # the leading "?"
+            ("question",    "bold"),                  # the prompt text
+            ("answer",      "fg:#bd93f9 bold"),       # final selected answer
+            ("pointer",     "fg:#ff79c6 bold"),       # ❯ pointer
+            ("highlighted", "fg:#ff79c6 bold"),       # highlighted choice (no bg)
+            ("selected",    "fg:#bd93f9 bold"),       # selected radio/check
+            ("separator",   "fg:#6272a4"),
+            ("instruction", "fg:#6272a4 italic"),     # right-side hint
+            ("text",        ""),
+            ("disabled",    "fg:#858585 italic"),
+        ]
+    )
+    if _HAVE_QUESTIONARY
+    else None
+)
 
 
 def _is_interactive() -> bool:
@@ -75,8 +100,13 @@ def select(
                 message,
                 choices=labels,
                 default=default_label,
-                use_indicator=True,
-                instruction="(↑/↓ to move · Enter to confirm · Esc/Ctrl-C to cancel)",
+                qmark="❯",
+                pointer="▸",
+                use_indicator=False,
+                use_arrow_keys=True,
+                use_shortcuts=False,
+                instruction="(↑/↓ · Enter)",
+                style=_CVO_STYLE,
             ).ask()
         except KeyboardInterrupt:
             return None
@@ -120,17 +150,98 @@ def _select_fallback(
 
 def secret(message: str) -> str:
     """
-    Hidden input. Uses questionary's password mode when available,
-    falls back to getpass.
+    Hidden input that echoes asterisks as the user types.
+
+    - Uses questionary's password mode when available — prompt_toolkit
+      renders one '*' per character.
+    - Falls back to a manual termios/msvcrt loop that ALSO echoes '*' so
+      the user sees feedback even without questionary.
+    - Final fallback: getpass (no echo at all). Last resort, only used
+      when no TTY is available.
     """
     if _HAVE_QUESTIONARY and _is_interactive():
         try:
-            value = questionary.password(message).ask()
+            value = questionary.password(
+                message,
+                qmark="❯",
+                style=_CVO_STYLE,
+            ).ask()
         except KeyboardInterrupt:
             return ""
         return (value or "").strip()
+
+    if _is_interactive():
+        masked = _read_masked(message)
+        if masked is not None:
+            return masked.strip()
+
     try:
         return getpass.getpass(message + " ").strip()
     except (KeyboardInterrupt, EOFError):
         print()
         return ""
+
+
+def _read_masked(prompt: str) -> str | None:
+    """
+    Read a line from stdin, echoing '*' for each character. Returns None
+    if the platform-specific path is unavailable (caller should fall back).
+    """
+    try:
+        if os.name == "nt":  # Windows
+            import msvcrt
+            sys.stdout.write(prompt + " ")
+            sys.stdout.flush()
+            buf: list[str] = []
+            while True:
+                ch = msvcrt.getwch()
+                if ch in ("\r", "\n"):
+                    sys.stdout.write("\n")
+                    sys.stdout.flush()
+                    return "".join(buf)
+                if ch == "\x03":  # Ctrl-C
+                    sys.stdout.write("\n")
+                    raise KeyboardInterrupt
+                if ch == "\x08":  # Backspace
+                    if buf:
+                        buf.pop()
+                        sys.stdout.write("\b \b")
+                        sys.stdout.flush()
+                    continue
+                buf.append(ch)
+                sys.stdout.write("*")
+                sys.stdout.flush()
+        else:  # POSIX
+            import termios, tty
+            sys.stdout.write(prompt + " ")
+            sys.stdout.flush()
+            fd = sys.stdin.fileno()
+            old = termios.tcgetattr(fd)
+            buf: list[str] = []
+            try:
+                tty.setraw(fd)
+                while True:
+                    ch = sys.stdin.read(1)
+                    if ch in ("\r", "\n"):
+                        sys.stdout.write("\r\n")
+                        sys.stdout.flush()
+                        return "".join(buf)
+                    if ch == "\x03":  # Ctrl-C
+                        sys.stdout.write("\r\n")
+                        raise KeyboardInterrupt
+                    if ch in ("\x7f", "\x08"):  # Backspace / DEL
+                        if buf:
+                            buf.pop()
+                            sys.stdout.write("\b \b")
+                            sys.stdout.flush()
+                        continue
+                    if ch == "\x04" and not buf:  # Ctrl-D on empty line
+                        sys.stdout.write("\r\n")
+                        return ""
+                    buf.append(ch)
+                    sys.stdout.write("*")
+                    sys.stdout.flush()
+            finally:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old)
+    except (ImportError, OSError):
+        return None

@@ -114,13 +114,19 @@ def _write_env_file(path: Path, values: dict[str, str]) -> None:
 # ──────────────────────────────────────────────────────────────────────
 def _prompt_provider_choice() -> str | None:
     """Arrow-key menu (with numbered fallback) to pick a provider."""
+    # Width of the longest display_name so all dots line up.
+    max_name = max(len(PROVIDERS[p]["display_name"]) for p in PROVIDER_ORDER)
     choices: list[tuple[str, str]] = []
     for p in PROVIDER_ORDER:
         meta = PROVIDERS[p]
-        marker = "  ✓ configured" if has_api_key(p) else "  · not configured"
-        choices.append((f"{meta['display_name']}{marker}", p))
+        dot = "●" if has_api_key(p) else "○"
+        label = f"{dot}  {meta['display_name'].ljust(max_name)}"
+        choices.append((label, p))
+
+    print()
+    print(_dim("   ●  configured     ○  not configured"))
     return select(
-        "Choose an LLM provider:",
+        "Choose an LLM provider",
         choices,
         default=PROVIDER_ORDER[0],
     )
