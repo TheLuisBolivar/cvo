@@ -283,9 +283,13 @@ def cmd_start(args: argparse.Namespace) -> int:
                 text = extract_docx_text(cv_path)
             _ok(f"Extracted {len(text)} chars of raw text")
             prompt = CV_PARSER_PROMPT.format(pdf_text=text[:60_000])
+            # Long / senior CVs can blow past 8000 — start with 16000, auto-retry to 32000.
             cv_dict = stream_json(
                 parser_client, prompt, CV_PARSER_SYSTEM,
-                max_tokens=8000, label=f"Parsing {kind.upper()} → JSON", temperature=0.1,
+                max_tokens=16000,
+                label=f"Parsing {kind.upper()} → JSON",
+                temperature=0.1,
+                max_retry_tokens=32000,
             )
         except Exception as e:
             print()
@@ -336,9 +340,10 @@ def cmd_start(args: argparse.Namespace) -> int:
         try:
             result = stream_json(
                 main_client, prompt, ALIGNER_SYSTEM,
-                max_tokens=2500,
+                max_tokens=4000,
                 label=f"Aligning experience {i}/{total}",
                 temperature=0.2,
+                max_retry_tokens=8000,
             )
             result["_original_experience"] = exp
             aligned.append(result)

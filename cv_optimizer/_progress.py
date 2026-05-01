@@ -112,13 +112,54 @@ def stream_json(
     max_tokens: int,
     label: str,
     temperature: float = 0.2,
+    retry_on_truncation: bool = True,
+    max_retry_tokens: int = 32000,
 ) -> dict[str, Any]:
+    """
+    Stream a response, parse it as JSON, return the dict.
+
+    If the response can't be parsed (typically because the model hit
+    `max_tokens` and got cut mid-JSON), automatically retry once with
+    double the budget, capped at `max_retry_tokens`. The user sees a
+    `⚠ retrying…` line and a fresh progress bar for the retry.
+    """
     raw = stream_with_progress(
         client.call_stream(prompt, system=system, max_tokens=max_tokens, temperature=temperature),
         label,
         max_tokens,
     )
-    return _extract_json(raw)
+    try:
+        return _extract_json(raw)
+    except Exception as e:
+        if not retry_on_truncation or _looks_complete(raw):
+            raise
+        bigger = min(max_retry_tokens, max_tokens * 2)
+        if bigger <= max_tokens:
+            raise
+        sys.stdout.write(_c(
+            f"  ⚠ response looked truncated ({len(raw)} chars) — "
+            f"retrying with max_tokens={bigger}\n",
+            "33",
+        ))
+        sys.stdout.flush()
+        raw2 = stream_with_progress(
+            client.call_stream(prompt, system=system, max_tokens=bigger, temperature=temperature),
+            f"{label} (retry)",
+            bigger,
+        )
+        return _extract_json(raw2)
+
+
+def _looks_complete(raw: str) -> bool:
+    """Cheap heuristic: complete JSON starts with `{` and ends with `}`."""
+    s = (raw or "").strip()
+    if not s:
+        return False
+    # Strip code fences if any.
+    if s.startswith("```"):
+        s = s.split("\n", 1)[1] if "\n" in s else s
+        s = s.rstrip("`").strip()
+    return s.startswith("{") and s.endswith("}")
 
 
 def stream_text(
