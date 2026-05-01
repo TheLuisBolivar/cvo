@@ -176,54 +176,73 @@ def _pick_cv() -> tuple[str, Path] | None:
         return _KIND_FROM_SUFFIX[suffix], p
 
 
-def _manage_cvs(existing: list[tuple[str, Path]]) -> None:
-    """Multi-select delete UI. Removes file + cached parse rows."""
-    if not existing:
-        _info("No CVs in data/ to manage.")
-        return
+_DONE_SENTINEL = ("__done__", Path("/"))
 
-    choices = [(f"[{kind.upper():4}] {p}", (kind, p)) for kind, p in existing]
-    picked = select_multiple(
-        "Select CVs to delete (space to toggle, Enter to confirm):",
-        choices,
-    )
-    if picked is None:
-        _info("Cancelled.")
-        return
-    if not picked:
-        _info("Nothing selected.")
-        return
 
-    print()
-    _warn(f"About to delete {len(picked)} file(s):")
-    for kind, p in picked:
-        print(f"    · [{kind.upper():4}] {p}")
-    print()
+def _manage_cvs(_unused: list[tuple[str, Path]]) -> None:
+    """
+    One-at-a-time delete loop. Each iteration:
+      1. Re-lists the files in data/ so the UI stays in sync.
+      2. Lets the user pick one (or 'Done' to exit).
+      3. Asks Y/N confirmation.
+      4. Wipes cache rows for that file_hash, then unlink()s.
+      5. Verifies the file is actually gone.
+    """
+    while True:
+        current = _list_data_files()
+        if not current:
+            _ok("No CVs left in data/.")
+            return
 
-    if not confirm("This cannot be undone. Proceed?", default=False):
-        _info("Cancelled — no files deleted.")
-        return
+        choices: list[tuple[str, tuple[str, Path]]] = [
+            (f"[{kind.upper():4}] {p}", (kind, p)) for kind, p in current
+        ]
+        choices.append(("◀  Done — back to CV picker", _DONE_SENTINEL))
 
-    deleted_files = 0
-    deleted_cache_rows = 0
-    for kind, p in picked:
+        picked = select(
+            f"Pick a CV to delete  ({len(current)} in data/)",
+            choices,
+            default=current[0],
+        )
+        if picked is None or picked == _DONE_SENTINEL:
+            return
+
+        kind, p = picked
+        if not confirm(
+            f"Delete {p}?  (this cannot be undone)",
+            default=False,
+        ):
+            _info("Skipped — file kept.")
+            continue
+
+        # Best-effort cache cleanup BEFORE unlink (we need the file to hash).
+        cache_rows = 0
         try:
-            # Best-effort cache cleanup BEFORE unlink so we still have the file to hash.
-            try:
-                if p.exists():
-                    h = hash_file(p)
-                    deleted_cache_rows += delete_cached_parses(h)
-            except Exception:
-                pass
+            if p.exists():
+                cache_rows = delete_cached_parses(hash_file(p))
+        except Exception as e:
+            _warn(f"Could not clean cache for {p}: {e}")
+
+        # Actual deletion + verification.
+        try:
             p.unlink()
-            deleted_files += 1
-            _ok(f"Deleted: {p}")
         except FileNotFoundError:
             _warn(f"Already gone: {p}")
+            continue
+        except PermissionError as e:
+            _err(f"Permission denied deleting {p}: {e}")
+            continue
         except Exception as e:
             _err(f"Could not delete {p}: {e}")
+            continue
 
-    _info(f"Removed {deleted_files} file(s) and {deleted_cache_rows} cached parse row(s).")
+        if p.exists():
+            _err(f"unlink() returned but file STILL exists: {p.resolve()}")
+            continue
+
+        _ok(f"Deleted: {p.resolve()}")
+        if cache_rows:
+            _info(f"  …and removed {cache_rows} cached parse row(s).")
 
 
 def _pick_offer() -> tuple[str, Any] | None:
