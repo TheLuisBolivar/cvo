@@ -132,6 +132,14 @@ def set_cached_parse(
         conn.commit()
 
 
+def delete_cached_parses(file_hash: str) -> int:
+    """Remove all cached parses for a file (any provider/model). Returns rows deleted."""
+    with _connect() as conn:
+        cur = conn.execute("DELETE FROM parsed_cv WHERE file_hash = ?", (file_hash,))
+        conn.commit()
+        return cur.rowcount or 0
+
+
 def stats() -> dict[str, int]:
     """Quick summary, useful for `cvo cache` later."""
     with _connect() as conn:

@@ -78,6 +78,72 @@ def _normalize_choices(
     return labels, values
 
 
+def select_multiple(
+    message: str,
+    choices: list[tuple[str, Any]] | list[str],
+) -> list[Any] | None:
+    """
+    Multi-select with arrow keys (space to toggle, Enter to confirm).
+    Returns the chosen values list, or None on cancel.
+    """
+    labels, values = _normalize_choices(choices)
+    if not labels:
+        return []
+
+    if _HAVE_QUESTIONARY and _is_interactive():
+        try:
+            picked_labels = questionary.checkbox(
+                message,
+                choices=labels,
+                qmark="❯",
+                instruction="(↑/↓ · space toggles · Enter confirms)",
+                style=_CVO_STYLE,
+            ).ask()
+        except KeyboardInterrupt:
+            return None
+        if picked_labels is None:
+            return None
+        return [values[labels.index(l)] for l in picked_labels]
+
+    # Fallback: comma-separated index list.
+    print()
+    print(message)
+    for i, lbl in enumerate(labels, start=1):
+        print(f"  {i}) {lbl}")
+    try:
+        raw = input("Indices (comma-separated, blank to cancel): ").strip()
+    except (EOFError, KeyboardInterrupt):
+        return None
+    if not raw:
+        return []
+    out: list[Any] = []
+    for tok in raw.split(","):
+        tok = tok.strip()
+        if tok.isdigit() and 1 <= int(tok) <= len(labels):
+            out.append(values[int(tok) - 1])
+    return out
+
+
+def confirm(message: str, default: bool = False) -> bool:
+    """Yes/No prompt."""
+    if _HAVE_QUESTIONARY and _is_interactive():
+        try:
+            ans = questionary.confirm(
+                message, default=default, qmark="❯", style=_CVO_STYLE,
+            ).ask()
+        except KeyboardInterrupt:
+            return False
+        return bool(ans)
+    suffix = "[Y/n]" if default else "[y/N]"
+    try:
+        raw = input(f"{message} {suffix} ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        return False
+    if not raw:
+        return default
+    return raw in ("y", "yes", "s", "si", "sí")
+
+
 def prompt_text(
     message: str,
     default: str = "",

@@ -24,6 +24,7 @@ from typing import Any
 from ._progress import stream_json, stream_text
 from .banner import print_banner
 from .cache import (
+    delete_cached_parses,
     get_cached_parse,
     hash_file,
     init_db,
@@ -32,7 +33,14 @@ from .cache import (
 from .docx_parser import extract_docx_text
 from .exporters import export_all, parse_format_list
 from .generator import build_optimized_cv_dict, generate_markdown, generate_report
-from .interactive import open_file_dialog, prompt_path, prompt_text, select
+from .interactive import (
+    confirm,
+    open_file_dialog,
+    prompt_path,
+    prompt_text,
+    select,
+    select_multiple,
+)
 from .match_score import MatchReport, compute_match
 from .models import CV, Experience, Offer
 from .pdf_parser import extract_pdf_text
@@ -108,50 +116,114 @@ def _list_data_files() -> list[tuple[str, Path]]:
 
 
 def _pick_cv() -> tuple[str, Path] | None:
-    """Returns (kind, path) for the chosen CV, or None to cancel."""
-    existing = _list_data_files()
-    options: list[tuple[str, str]] = [
-        ("Type a path",         "path"),
-        ("Open file dialog",    "dialog"),
-    ]
-    if existing:
-        options.insert(0, (f"Use one already in data/  ({len(existing)} found)", "data"))
+    """Returns (kind, path) for the chosen CV, or None to cancel.
 
-    mode = select("How do you want to provide the CV?", options, default="data" if existing else "path")
-    if mode is None:
-        return None
+    Loops so 'Manage / delete' returns to the picker after deletion.
+    """
+    while True:
+        existing = _list_data_files()
+        options: list[tuple[str, str]] = [
+            ("Type a path",      "path"),
+            ("Open file dialog", "dialog"),
+        ]
+        if existing:
+            options.insert(0, (f"Use one already in data/  ({len(existing)} found)", "data"))
+            options.append(("Manage / delete CVs in data/", "manage"))
 
-    if mode == "data":
-        choices = [(f"[{k.upper():4}] {p}", (k, p)) for k, p in existing]
-        return select("Pick a CV from data/", choices, default=existing[0])
-
-    if mode == "dialog":
-        path = open_file_dialog(
-            "Select your CV",
-            filetypes=[("CV files", "*.pdf *.docx *.json"),
-                       ("PDF", "*.pdf"),
-                       ("DOCX", "*.docx"),
-                       ("JSON", "*.json")],
+        mode = select(
+            "How do you want to provide the CV?",
+            options,
+            default="data" if existing else "path",
         )
-        if not path:
-            _warn("No file selected.")
+        if mode is None:
             return None
-    else:  # "path"
-        raw = prompt_path(
-            "Path to your CV (.pdf / .docx / .json):",
-            only_existing=True,
-            extensions=[".pdf", ".docx", ".json"],
-        )
-        if not raw:
-            return None
-        path = raw
 
-    p = Path(path).expanduser()
-    suffix = p.suffix.lower()
-    if suffix not in _KIND_FROM_SUFFIX:
-        _err(f"Unsupported file type: {suffix}")
-        return None
-    return _KIND_FROM_SUFFIX[suffix], p
+        if mode == "manage":
+            _manage_cvs(existing)
+            continue  # back to the picker so the user can pick or delete more
+
+        if mode == "data":
+            choices = [(f"[{k.upper():4}] {p}", (k, p)) for k, p in existing]
+            picked = select("Pick a CV from data/", choices, default=existing[0])
+            return picked
+
+        if mode == "dialog":
+            path = open_file_dialog(
+                "Select your CV",
+                filetypes=[("CV files", "*.pdf *.docx *.json"),
+                           ("PDF", "*.pdf"),
+                           ("DOCX", "*.docx"),
+                           ("JSON", "*.json")],
+            )
+            if not path:
+                _warn("No file selected.")
+                continue
+        else:  # "path"
+            raw = prompt_path(
+                "Path to your CV (.pdf / .docx / .json):",
+                only_existing=True,
+                extensions=[".pdf", ".docx", ".json"],
+            )
+            if not raw:
+                continue
+            path = raw
+
+        p = Path(path).expanduser()
+        suffix = p.suffix.lower()
+        if suffix not in _KIND_FROM_SUFFIX:
+            _err(f"Unsupported file type: {suffix}")
+            continue
+        return _KIND_FROM_SUFFIX[suffix], p
+
+
+def _manage_cvs(existing: list[tuple[str, Path]]) -> None:
+    """Multi-select delete UI. Removes file + cached parse rows."""
+    if not existing:
+        _info("No CVs in data/ to manage.")
+        return
+
+    choices = [(f"[{kind.upper():4}] {p}", (kind, p)) for kind, p in existing]
+    picked = select_multiple(
+        "Select CVs to delete (space to toggle, Enter to confirm):",
+        choices,
+    )
+    if picked is None:
+        _info("Cancelled.")
+        return
+    if not picked:
+        _info("Nothing selected.")
+        return
+
+    print()
+    _warn(f"About to delete {len(picked)} file(s):")
+    for kind, p in picked:
+        print(f"    · [{kind.upper():4}] {p}")
+    print()
+
+    if not confirm("This cannot be undone. Proceed?", default=False):
+        _info("Cancelled — no files deleted.")
+        return
+
+    deleted_files = 0
+    deleted_cache_rows = 0
+    for kind, p in picked:
+        try:
+            # Best-effort cache cleanup BEFORE unlink so we still have the file to hash.
+            try:
+                if p.exists():
+                    h = hash_file(p)
+                    deleted_cache_rows += delete_cached_parses(h)
+            except Exception:
+                pass
+            p.unlink()
+            deleted_files += 1
+            _ok(f"Deleted: {p}")
+        except FileNotFoundError:
+            _warn(f"Already gone: {p}")
+        except Exception as e:
+            _err(f"Could not delete {p}: {e}")
+
+    _info(f"Removed {deleted_files} file(s) and {deleted_cache_rows} cached parse row(s).")
 
 
 def _pick_offer() -> tuple[str, Any] | None:
