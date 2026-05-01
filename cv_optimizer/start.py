@@ -33,7 +33,7 @@ from .docx_parser import extract_docx_text
 from .exporters import export_all, parse_format_list
 from .generator import build_optimized_cv_dict, generate_markdown, generate_report
 from .interactive import open_file_dialog, prompt_path, prompt_text, select
-from .models import CV, Experience
+from .models import CV, Experience, Offer
 from .pdf_parser import extract_pdf_text
 from .url_fetcher import fetch_offer_text, is_url
 from .prompts import (
@@ -88,9 +88,10 @@ def _step(idx: int, total: int, title: str) -> None:
 # File-pick helpers
 # ──────────────────────────────────────────────────────────────────────
 _DATA_DIRS = {
-    "json": Path("data/json"),
-    "pdf":  Path("data/pdfs"),
-    "docx": Path("data/docx"),
+    "json":   Path("data/json"),
+    "pdf":    Path("data/pdfs"),
+    "docx":   Path("data/docx"),
+    "offers": Path("data/offers"),
 }
 _KIND_FROM_SUFFIX = {".json": "json", ".pdf": "pdf", ".docx": "docx"}
 
@@ -180,15 +181,21 @@ def _pick_offer() -> tuple[str, Any] | None:
     if mode == "dialog":
         path = open_file_dialog(
             "Select the job offer",
-            filetypes=[("Text", "*.txt *.md"), ("Any", "*.*")],
+            filetypes=[
+                ("Offer files", "*.txt *.md *.json"),
+                ("Text",        "*.txt *.md"),
+                ("JSON",        "*.json"),
+                ("Any",         "*.*"),
+            ],
         )
         if not path:
             _warn("No file selected.")
             return None
     else:
         path = prompt_path(
-            "Path to the offer (.txt / .md):",
+            "Path to the offer (.txt / .md / .json):",
             only_existing=True,
+            extensions=[".txt", ".md", ".json"],
         )
         if not path:
             return None
@@ -372,6 +379,10 @@ def cmd_start(args: argparse.Namespace) -> int:
         _err("No offer selected."); return 1
     offer_kind, offer_value = picked_offer
 
+    offer: Offer | None = None
+    offer_text: str = ""
+    offer_label: str = ""  # used to name the saved JSON
+
     if offer_kind == "url":
         _info(f"Fetching offer from {offer_value} …")
         try:
@@ -379,21 +390,48 @@ def cmd_start(args: argparse.Namespace) -> int:
         except (RuntimeError, ValueError) as e:
             _err(str(e)); return 1
         _ok(f"Fetched and cleaned {len(offer_text)} chars from {offer_value}")
+        offer_label = _slug_from_url(offer_value)
+
     else:
         offer_path: Path = offer_value
         if not offer_path.exists():
             _err(f"Offer not found: {offer_path}"); return 1
-        offer_text = offer_path.read_text(encoding="utf-8")
-        _ok(f"Offer loaded ({len(offer_text)} chars): {offer_path}")
+        suffix = offer_path.suffix.lower()
+        if suffix == ".json":
+            try:
+                offer = Offer.from_json_file(offer_path)
+            except Exception as e:
+                _err(f"Could not load offer JSON {offer_path}: {e}"); return 1
+            _ok(f"Offer JSON loaded — skipping analyzer (already structured).")
+            _info(f"Position: {offer.position or '(unknown)'} · seniority: {offer.seniority or '(unknown)'}")
+        elif suffix in (".txt", ".md"):
+            offer_text = offer_path.read_text(encoding="utf-8")
+            _ok(f"Offer loaded ({len(offer_text)} chars): {offer_path}")
+            offer_label = offer_path.stem
+        else:
+            _err(f"Unsupported offer format: {suffix}. Use .txt, .md, or .json.")
+            return 1
 
     # ── Step 4 — run the pipeline ──
     _step(4, 4, "Optimize the CV")
 
-    analyzer_prompt = ANALYZER_PROMPT.format(offer=offer_text.strip())
-    analysis = stream_json(
-        main_client, analyzer_prompt, ANALYZER_SYSTEM,
-        max_tokens=3000, label="Analyzing offer", temperature=0.2,
-    )
+    # Run analyzer ONLY when we have raw text (URL / .txt / .md).
+    if offer is None:
+        analyzer_prompt = ANALYZER_PROMPT.format(offer=offer_text.strip())
+        analysis = stream_json(
+            main_client, analyzer_prompt, ANALYZER_SYSTEM,
+            max_tokens=3000, label="Analyzing offer", temperature=0.2,
+        )
+        offer = Offer.from_dict(analysis)
+        offer._source = offer_kind
+        offer._source_value = offer_value if offer_kind == "url" else str(offer_path)
+        offer._raw_text = offer_text
+        # Persist the analyzed offer for reuse next time.
+        if offer_label:
+            saved = offer.save(_DATA_DIRS["offers"] / f"{offer_label}.json")
+            _ok(f"Saved structured offer to: {saved}")
+
+    analysis = offer.to_dict(include_provenance=False)
     _ok(f"Position: {analysis.get('position','?')} · seniority: {analysis.get('seniority','?')}")
     _ok(f"hard_skills={len(analysis.get('hard_skills', []))} · ats_keywords={len(analysis.get('ats_keywords', []))}")
 
@@ -525,6 +563,18 @@ def _copy_into_data(input_path: Path, kind: str) -> Path:
     shutil.copy2(input_path, target)
     _info(f"Copied CV → {target}")
     return target
+
+
+def _slug_from_url(url: str, max_len: int = 50) -> str:
+    """URL → a filesystem-safe slug like 'linkedin_com-jobs-1234-abc12345'."""
+    import hashlib
+    import re
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    raw = (parsed.netloc + parsed.path).replace("/", "-")
+    raw = re.sub(r"[^a-zA-Z0-9._-]+", "", raw).strip("-")[:max_len]
+    suffix = hashlib.md5(url.encode("utf-8")).hexdigest()[:8]
+    return f"{raw or 'offer'}-{suffix}"
 
 
 def _files_equal(a: Path, b: Path, chunk: int = 65536) -> bool:

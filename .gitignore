@@ -10,11 +10,13 @@
 data/pdfs/*
 data/json/*
 data/docx/*
+data/offers/*
 output/*
 # Keep the directory structure in git
 !data/pdfs/.gitkeep
 !data/json/.gitkeep
 !data/docx/.gitkeep
+!data/offers/.gitkeep
 !output/.gitkeep
 
 # Stray PDFs / DOCX anywhere in the repo (extra safety net)

@@ -108,7 +108,7 @@ else
 fi
 
 # ── 5. Data folders ───────────────────────────────────────────────────
-for dir in data/pdfs data/json data/docx output; do
+for dir in data/pdfs data/json data/docx data/offers output; do
     if [[ -d "$dir" ]]; then
         ok "$dir/ already exists"
     else
