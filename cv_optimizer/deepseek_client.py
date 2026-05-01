@@ -114,14 +114,9 @@ class DeepSeekClient:
                 delta_obj = chunk.choices[0].delta
             except (IndexError, AttributeError):
                 continue
-            # Primary: visible answer text.
+            # Only yield the visible answer text. Reasoning models also
+            # send `reasoning_content`, but mixing it into the buffer
+            # contaminates JSON parsing — the real answer is in `content`.
             content = getattr(delta_obj, "content", None)
             if content:
                 yield content
-                continue
-            # Fallback: some DeepSeek (V3 reasoner / V4 thinking) variants
-            # send the answer through `reasoning_content` instead. Yield it
-            # so the parser still has something to work with.
-            reasoning = getattr(delta_obj, "reasoning_content", None)
-            if reasoning:
-                yield reasoning

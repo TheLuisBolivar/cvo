@@ -199,6 +199,18 @@ def stream_json(
     try:
         return _extract_json(raw)
     except Exception:
+        # If the response is prose (reasoning leak / non-JSON output),
+        # bigger budgets only buy more prose. Skip the retry and go
+        # directly to the non-streaming JSON-mode fallback.
+        if not _looks_like_json(raw):
+            sys.stdout.write(_c(
+                "  ⚠ stream returned prose, not JSON — falling back to non-streaming JSON mode\n",
+                "33",
+            ))
+            sys.stdout.flush()
+            return client.call_json(prompt, system=system, max_tokens=max_tokens, temperature=temperature)
+
+        # Looks JSON-ish but didn't parse → likely truncation. Retry bigger.
         if not retry_on_truncation or _looks_complete(raw):
             raise
         bigger = min(max_retry_tokens, max_tokens * 2)
@@ -215,10 +227,9 @@ def stream_json(
             f"{label} (retry)",
             bigger,
         )
-        if not raw2.strip():
-            # Stream STILL empty after retry — try non-streaming as a last resort.
+        if not raw2.strip() or not _looks_like_json(raw2):
             sys.stdout.write(_c(
-                "  ⚠ retry stream also empty — falling back to non-streaming call\n",
+                "  ⚠ retry stream not JSON — falling back to non-streaming JSON mode\n",
                 "33",
             ))
             sys.stdout.flush()
@@ -236,6 +247,18 @@ def _looks_complete(raw: str) -> bool:
         s = s.split("\n", 1)[1] if "\n" in s else s
         s = s.rstrip("`").strip()
     return s.startswith("{") and s.endswith("}")
+
+
+def _looks_like_json(raw: str) -> bool:
+    """True iff the response at least *starts* like JSON (begins with `{`)."""
+    s = (raw or "").lstrip()
+    if s.startswith("```"):
+        s = s.split("\n", 1)[1] if "\n" in s else s
+        s = s.lstrip("`").lstrip()
+    # Allow up to a short preamble before the first `{` (some models add
+    # 'Here is the JSON:' before the actual object).
+    idx = s.find("{")
+    return 0 <= idx <= 50
 
 
 def stream_text(
