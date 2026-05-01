@@ -78,6 +78,31 @@ def _normalize_choices(
     return labels, values
 
 
+def prompt_text(
+    message: str,
+    default: str = "",
+    validate: Any = None,
+) -> str | None:
+    """Prompt for a free-form text value (e.g. a URL)."""
+    if not (_HAVE_QUESTIONARY and _is_interactive()):
+        try:
+            raw = input(message + " ").strip()
+        except (EOFError, KeyboardInterrupt):
+            return None
+        return raw or None
+    try:
+        value = questionary.text(
+            message,
+            default=default,
+            validate=validate,
+            qmark="❯",
+            style=_CVO_STYLE,
+        ).ask()
+    except KeyboardInterrupt:
+        return None
+    return (value or "").strip() or None
+
+
 def prompt_path(
     message: str,
     only_existing: bool = True,

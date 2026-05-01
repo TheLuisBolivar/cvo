@@ -86,3 +86,4 @@ logs/
 
 # ─── Tooling caches inside this repo ──────────────────────────────────
 .epsilon/
+.cvo/

@@ -23,12 +23,19 @@ from typing import Any
 
 from ._progress import stream_json, stream_text
 from .banner import print_banner
+from .cache import (
+    get_cached_parse,
+    hash_file,
+    init_db,
+    set_cached_parse,
+)
 from .docx_parser import extract_docx_text
 from .exporters import export_all, parse_format_list
 from .generator import build_optimized_cv_dict, generate_markdown, generate_report
-from .interactive import open_file_dialog, prompt_path, select
+from .interactive import open_file_dialog, prompt_path, prompt_text, select
 from .models import CV, Experience
 from .pdf_parser import extract_pdf_text
+from .url_fetcher import fetch_offer_text, is_url
 from .prompts import (
     ALIGNER_PROMPT, ALIGNER_SYSTEM,
     ANALYZER_PROMPT, ANALYZER_SYSTEM,
@@ -145,15 +152,31 @@ def _pick_cv() -> tuple[str, Path] | None:
     return _KIND_FROM_SUFFIX[suffix], p
 
 
-def _pick_offer() -> Path | None:
-    """Pick the offer .txt / .md path."""
+def _pick_offer() -> tuple[str, Any] | None:
+    """
+    Pick where the offer comes from. Returns (kind, value):
+      - ("file", Path)
+      - ("url",  str)
+      - None if cancelled.
+    """
     options = [
         ("Type a path",      "path"),
         ("Open file dialog", "dialog"),
+        ("Paste a URL",      "url"),
     ]
     mode = select("How do you want to provide the job offer?", options, default="path")
     if mode is None:
         return None
+
+    if mode == "url":
+        url = prompt_text(
+            "Offer URL (https://…):",
+            validate=lambda v: True if is_url(v or "") else "Must start with http:// or https://",
+        )
+        if not url:
+            return None
+        return "url", url
+
     if mode == "dialog":
         path = open_file_dialog(
             "Select the job offer",
@@ -167,7 +190,9 @@ def _pick_offer() -> Path | None:
             "Path to the offer (.txt / .md):",
             only_existing=True,
         )
-    return Path(path).expanduser() if path else None
+        if not path:
+            return None
+    return "file", Path(path).expanduser()
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -262,42 +287,79 @@ def cmd_start(args: argparse.Namespace) -> int:
         _ok("Input is already JSON — no parsing needed.")
         cv = CV.from_json_file(cv_path)
     else:
-        proceed = select(
-            f"Process the {kind.upper()} into JSON now?",
-            [("Yes — parse it with the LLM", True),
-             ("No — abort",                  False)],
-            default=True,
-        )
-        if not proceed:
-            _warn("Aborted."); return 0
-
         # Pick parser provider: prefer DeepSeek when available (cheaper).
         parser_provider = "deepseek" if has_api_key("deepseek") else provider
         parser_client = make_client(parser_provider)
-        _info(f"Parser:   {provider_meta(parser_provider)['display_name']} (model: {parser_client.model})")
         intermediate = _DATA_DIRS["json"] / (cv_path.stem + ".json")
-        try:
-            if kind == "pdf":
-                text = extract_pdf_text(cv_path)
-            else:
-                text = extract_docx_text(cv_path)
-            _ok(f"Extracted {len(text)} chars of raw text")
-            prompt = CV_PARSER_PROMPT.format(pdf_text=text[:60_000])
-            # Long / senior CVs can blow past 8000 — start with 16000, auto-retry to 32000.
-            cv_dict = stream_json(
-                parser_client, prompt, CV_PARSER_SYSTEM,
-                max_tokens=16000,
-                label=f"Parsing {kind.upper()} → JSON",
-                temperature=0.1,
-                max_retry_tokens=32000,
-            )
-        except Exception as e:
-            print()
-            _err(f"Parsing failed: {e}"); return 1
 
-        intermediate.parent.mkdir(parents=True, exist_ok=True)
-        intermediate.write_text(json.dumps(cv_dict, ensure_ascii=False, indent=2), encoding="utf-8")
-        _ok(f"Saved structured JSON to: {intermediate}")
+        # ── Idempotent cache check ──
+        cv_dict: dict[str, Any] | None = None
+        if not args.no_cache:
+            try:
+                init_db()
+                file_hash = hash_file(cv_path)
+                cached = get_cached_parse(file_hash, parser_provider, parser_client.model)
+            except Exception as e:
+                _warn(f"Cache lookup failed ({e}) — re-parsing.")
+                cached = None
+            if cached:
+                _ok(
+                    f"Cached parse found (parsed {cached['parsed_at']} with "
+                    f"{parser_provider}/{parser_client.model}) — reusing."
+                )
+                _info(_dim("Pass --no-cache to force a fresh parse."))
+                cv_dict = cached["data"]
+                # Mirror to data/json/ for visibility.
+                intermediate.parent.mkdir(parents=True, exist_ok=True)
+                intermediate.write_text(json.dumps(cv_dict, ensure_ascii=False, indent=2), encoding="utf-8")
+
+        if cv_dict is None:
+            proceed = select(
+                f"Process the {kind.upper()} into JSON now?",
+                [("Yes — parse it with the LLM", True),
+                 ("No — abort",                  False)],
+                default=True,
+            )
+            if not proceed:
+                _warn("Aborted."); return 0
+
+            _info(f"Parser:   {provider_meta(parser_provider)['display_name']} (model: {parser_client.model})")
+            try:
+                if kind == "pdf":
+                    text = extract_pdf_text(cv_path)
+                else:
+                    text = extract_docx_text(cv_path)
+                _ok(f"Extracted {len(text)} chars of raw text")
+                prompt = CV_PARSER_PROMPT.format(pdf_text=text[:60_000])
+                # Long / senior CVs can blow past 8000 — start at 16k, retry to 32k.
+                cv_dict = stream_json(
+                    parser_client, prompt, CV_PARSER_SYSTEM,
+                    max_tokens=16000,
+                    label=f"Parsing {kind.upper()} → JSON",
+                    temperature=0.1,
+                    max_retry_tokens=32000,
+                )
+            except Exception as e:
+                print()
+                _err(f"Parsing failed: {e}"); return 1
+
+            intermediate.parent.mkdir(parents=True, exist_ok=True)
+            intermediate.write_text(json.dumps(cv_dict, ensure_ascii=False, indent=2), encoding="utf-8")
+            _ok(f"Saved structured JSON to: {intermediate}")
+
+            # Save to cache for next time.
+            try:
+                set_cached_parse(
+                    file_hash=hash_file(cv_path),
+                    parser_provider=parser_provider,
+                    parser_model=parser_client.model,
+                    file_name=cv_path.name,
+                    file_kind=kind,
+                    parsed=cv_dict,
+                )
+            except Exception as e:
+                _warn(f"Could not write to cache: {e}")
+
         cv = CV.from_dict(cv_dict)
 
     _ok(f"{cv.personal_info.get('name','(no name)')} · {len(cv.experiences)} experience(s)")
@@ -305,11 +367,24 @@ def cmd_start(args: argparse.Namespace) -> int:
     # ── Step 3 — pick offer(s) ──
     _step(3, 4, "Select the job offer")
     _info("Batch mode (multiple offers) not yet implemented — single offer for now.")
-    offer_path = _pick_offer()
-    if offer_path is None or not offer_path.exists():
+    picked_offer = _pick_offer()
+    if picked_offer is None:
         _err("No offer selected."); return 1
-    offer_text = offer_path.read_text(encoding="utf-8")
-    _ok(f"Offer loaded ({len(offer_text)} chars): {offer_path}")
+    offer_kind, offer_value = picked_offer
+
+    if offer_kind == "url":
+        _info(f"Fetching offer from {offer_value} …")
+        try:
+            offer_text = fetch_offer_text(offer_value)
+        except (RuntimeError, ValueError) as e:
+            _err(str(e)); return 1
+        _ok(f"Fetched and cleaned {len(offer_text)} chars from {offer_value}")
+    else:
+        offer_path: Path = offer_value
+        if not offer_path.exists():
+            _err(f"Offer not found: {offer_path}"); return 1
+        offer_text = offer_path.read_text(encoding="utf-8")
+        _ok(f"Offer loaded ({len(offer_text)} chars): {offer_path}")
 
     # ── Step 4 — run the pipeline ──
     _step(4, 4, "Optimize the CV")

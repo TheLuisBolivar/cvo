@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 from .banner import mask_key, print_banner
+from .cache import init_db
 from .interactive import secret, select
 from .providers import (
     PROVIDER_ORDER,
@@ -225,6 +226,13 @@ def run_wizard(
     if key:
         os.environ[meta["env_key"]] = key
     os.environ["CVO_PROVIDER"] = provider
+
+    # Bootstrap the local SQLite cache so the first `cvo start` is fast.
+    try:
+        db_path = init_db()
+        _ok(f"Cache DB ready at: {db_path}")
+    except Exception as e:
+        _warn(f"Could not initialize cache DB: {e}  (the app still works.)")
 
     # Cool banner when everything is good to go.
     if key:

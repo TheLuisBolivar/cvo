@@ -604,6 +604,8 @@ def _build_parser() -> argparse.ArgumentParser:
                          help="Base output path (default: output/cv_optimized.md).")
     p_start.add_argument("--format", default="md,json",
                          help="Output formats. Options: md, json, pdf, docx, or 'all'. Default: md,json.")
+    p_start.add_argument("--no-cache", action="store_true",
+                         help="Skip the SQLite parse cache; force a fresh PDF/DOCX → JSON parse.")
     p_start.set_defaults(func=cmd_start)
 
     # cvo run
