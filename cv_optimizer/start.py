@@ -33,6 +33,7 @@ from .docx_parser import extract_docx_text
 from .exporters import export_all, parse_format_list
 from .generator import build_optimized_cv_dict, generate_markdown, generate_report
 from .interactive import open_file_dialog, prompt_path, prompt_text, select
+from .match_score import MatchReport, compute_match
 from .models import CV, Experience, Offer
 from .pdf_parser import extract_pdf_text
 from .url_fetcher import fetch_offer_text, is_url
@@ -260,6 +261,36 @@ def _score_bar(score: int, width: int = 20) -> str:
     return _red(bar)
 
 
+def _print_match_report(report: MatchReport) -> None:
+    """Pretty-print the local CV ↔ Offer match score with a breakdown."""
+    overall_bar = _score_bar(report.overall, width=28)
+    print()
+    print(_bold(_magenta(f"  CV ↔ Offer match")))
+    print(f"  {overall_bar}  {_bold(str(report.overall) + '%')}")
+    print()
+
+    rows = [
+        ("Hard skills",   "40%", report.hard_skills),
+        ("Must-have",     "30%", report.must_have),
+        ("ATS keywords",  "20%", report.ats_keywords),
+        ("Seniority",     "10%", report.seniority),
+    ]
+    for name, weight, cat in rows:
+        bar = _score_bar(int(cat.score), width=14)
+        print(f"  {name:<14} {_dim(weight)}  {bar}  {_bold(f'{int(cat.score)}%'.rjust(4))}")
+        if cat.matched:
+            shown = ", ".join(cat.matched[:8])
+            extra = f"  (+{len(cat.matched)-8} more)" if len(cat.matched) > 8 else ""
+            print(_green(f"     ✓ {shown}{extra}"))
+        if cat.missing:
+            shown = ", ".join(cat.missing[:8])
+            extra = f"  (+{len(cat.missing)-8} more)" if len(cat.missing) > 8 else ""
+            print(_red(f"     ✗ {shown}{extra}"))
+        if cat.note:
+            print(_dim(f"       {cat.note}"))
+    print()
+
+
 # ──────────────────────────────────────────────────────────────────────
 # Subcommand entry point
 # ──────────────────────────────────────────────────────────────────────
@@ -434,6 +465,25 @@ def cmd_start(args: argparse.Namespace) -> int:
     analysis = offer.to_dict(include_provenance=False)
     _ok(f"Position: {analysis.get('position','?')} · seniority: {analysis.get('seniority','?')}")
     _ok(f"hard_skills={len(analysis.get('hard_skills', []))} · ats_keywords={len(analysis.get('ats_keywords', []))}")
+
+    # ── Match preview (deterministic, no LLM) ──
+    report = compute_match(cv, offer)
+    _print_match_report(report)
+
+    if report.overall < 30:
+        prompt_msg = f"Match is low ({report.overall}%). Optimize anyway?"
+        default_proceed = False
+    else:
+        prompt_msg = "Continue with the optimization?"
+        default_proceed = True
+    proceed = select(
+        prompt_msg,
+        [("Yes — run optimizer", True),
+         ("No — abort",          False)],
+        default=default_proceed,
+    )
+    if not proceed:
+        _warn("Aborted by user."); return 0
 
     print()
     _info(f"Aligning {len(cv.experiences)} experience(s) — BEFORE / AFTER per experience:")
