@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 import time
 from typing import Any, Iterator
 
@@ -35,8 +36,17 @@ def _c(s: str, code: str) -> str:
 _CHARS_PER_TOKEN = 4.0
 
 
+_SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+
+
 class ProgressBar:
-    """Single-line in-place progress bar with a 0–100% indicator."""
+    """Single-line in-place progress bar with a 0–100% indicator.
+
+    Shows the empty bar immediately on construction (so users see
+    feedback during the LLM's "time to first token") and animates a
+    spinner via a background thread until the stream starts producing
+    tokens.
+    """
 
     def __init__(self, label: str, max_tokens: int, width: int = 28):
         self.label = label
@@ -46,8 +56,25 @@ class ProgressBar:
         self.started = time.time()
         self._last_pct = -1.0
         self._enabled = sys.stdout.isatty()
+        self._spinner_idx = 0
+        self._stop_event = threading.Event()
+        self._spinner_thread: threading.Thread | None = None
+
+        if self._enabled:
+            # Paint an empty bar IMMEDIATELY — even before the first
+            # token arrives — so the user knows we're working.
+            self._render(0.0)
+            self._last_pct = 0.0
+            # Start the spinner in a background thread; it stops as soon
+            # as the first update() lands.
+            self._spinner_thread = threading.Thread(target=self._spin, daemon=True)
+            self._spinner_thread.start()
 
     def update(self, chunk_chars: int) -> None:
+        # First real token — kill the spinner.
+        if self._spinner_thread is not None and not self._stop_event.is_set():
+            self._stop_event.set()
+
         self.chars += chunk_chars
         approx_tokens = self.chars / _CHARS_PER_TOKEN
         pct = min(95.0, (approx_tokens / self.max_tokens) * 100.0)
@@ -57,6 +84,12 @@ class ProgressBar:
             self._last_pct = pct
 
     def finish(self, success: bool = True) -> None:
+        # Make sure the spinner thread has stopped before we draw the
+        # final line, otherwise it could overwrite our last update.
+        self._stop_event.set()
+        if self._spinner_thread is not None:
+            self._spinner_thread.join(timeout=0.5)
+
         elapsed = time.time() - self.started
         if success:
             self._render(100.0, final=True)
@@ -66,20 +99,33 @@ class ProgressBar:
             sys.stdout.write(f"  done in {elapsed:.1f}s\n")
         sys.stdout.flush()
 
+    def _spin(self) -> None:
+        """Animate the spinner while we wait for the first token."""
+        while not self._stop_event.wait(0.1):
+            if self.chars > 0:
+                # First token already arrived — stop spinning.
+                return
+            self._spinner_idx = (self._spinner_idx + 1) % len(_SPINNER_FRAMES)
+            self._render(0.0)
+
     def _render(self, pct: float, final: bool = False) -> None:
         if not self._enabled:
-            # No TTY — print one dot per ~5% advanced, no in-place.
             return
         filled = round(pct / 100.0 * self.width)
         bar = "█" * filled + "░" * (self.width - filled)
-        # Color: red <50, yellow <75, green ≥75.
+        # Color: magenta <50, yellow <75, green ≥75.
         if pct >= 75:
-            colored = _c(bar, "32")  # green
+            colored = _c(bar, "32")
         elif pct >= 50:
-            colored = _c(bar, "33")  # yellow
+            colored = _c(bar, "33")
         else:
-            colored = _c(bar, "1;35")  # magenta
-        line = f"\r  {self.label:<22}  {colored}  {pct:5.1f}%"
+            colored = _c(bar, "1;35")
+        # Spinner frame, only meaningful while we're at 0% waiting.
+        if pct < 0.5 and not final:
+            spin = _c(_SPINNER_FRAMES[self._spinner_idx], "1;35")
+        else:
+            spin = " "
+        line = f"\r  {spin} {self.label:<22}  {colored}  {pct:5.1f}%"
         sys.stdout.write(line)
         sys.stdout.flush()
 
