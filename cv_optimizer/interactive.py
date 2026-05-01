@@ -78,6 +78,101 @@ def _normalize_choices(
     return labels, values
 
 
+def prompt_path(
+    message: str,
+    only_existing: bool = True,
+    extensions: list[str] | None = None,
+) -> str | None:
+    """
+    Prompt the user for a filesystem path with tab-autocompletion.
+    Returns the typed path (validated to exist if `only_existing`), or None.
+    """
+    if not (_HAVE_QUESTIONARY and _is_interactive()):
+        try:
+            raw = input(message + " ").strip()
+        except (EOFError, KeyboardInterrupt):
+            return None
+        return raw or None
+
+    def _validate(text: str) -> bool | str:
+        text = (text or "").strip()
+        if not text:
+            return "Path is required."
+        from pathlib import Path as _P
+        p = _P(text).expanduser()
+        if only_existing and not p.exists():
+            return f"Path does not exist: {p}"
+        if extensions and p.suffix.lower() not in extensions:
+            return f"Expected one of: {', '.join(extensions)}"
+        return True
+
+    try:
+        value = questionary.path(
+            message,
+            validate=_validate,
+            qmark="❯",
+            style=_CVO_STYLE,
+        ).ask()
+    except KeyboardInterrupt:
+        return None
+    return value
+
+
+def open_file_dialog(
+    title: str,
+    filetypes: list[tuple[str, str]] | None = None,
+) -> str | None:
+    """
+    Open the OS file picker. Tries tkinter first (cross-platform), falls
+    back to AppleScript on macOS, returns None if neither works.
+
+    `filetypes` is a list like [("PDF", "*.pdf"), ("DOCX", "*.docx")].
+    """
+    # 1) tkinter
+    try:
+        import tkinter
+        from tkinter import filedialog
+
+        root = tkinter.Tk()
+        root.withdraw()
+        try:
+            root.attributes("-topmost", True)
+        except Exception:
+            pass
+        try:
+            result = filedialog.askopenfilename(title=title, filetypes=filetypes or [])
+        finally:
+            root.destroy()
+        return result if result else None
+    except Exception:
+        pass
+
+    # 2) macOS osascript fallback
+    if sys.platform == "darwin":
+        import subprocess
+        ext_filter = ""
+        if filetypes:
+            exts = []
+            for _, pattern in filetypes:
+                # "*.pdf" → "pdf"
+                exts.extend(p.lstrip("*.").lower() for p in pattern.split())
+            if exts:
+                quoted = ", ".join(f'"{e}"' for e in exts)
+                ext_filter = f" of type {{{quoted}}}"
+        script = f'POSIX path of (choose file with prompt "{title}"{ext_filter})'
+        try:
+            out = subprocess.check_output(
+                ["osascript", "-e", script],
+                stderr=subprocess.DEVNULL,
+                timeout=300,
+            ).decode().strip()
+            return out or None
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, FileNotFoundError):
+            return None
+
+    return None
+
+
 def select(
     message: str,
     choices: list[tuple[str, Any]] | list[str],

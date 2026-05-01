@@ -2,6 +2,7 @@
 cvo — cv-optimizer command-line entrypoint.
 
 Subcommands:
+    cvo start        Interactive guided pipeline (recommended for new users)
     cvo run          Full pipeline: CV (PDF or JSON) + offer → optimized CV
     cvo parse-pdf    Just parse a CV PDF into the standard JSON
     cvo setup        Interactive provider + API-key wizard
@@ -60,6 +61,7 @@ from .client import _extract_json
 from .deepseek_client import DEFAULT_DEEPSEEK_MODEL
 from .interactive import select
 from .providers import LLMClient, PROVIDER_ORDER
+from .start import cmd_start
 from .prompts import (
     ALIGNER_PROMPT,
     ALIGNER_SYSTEM,
@@ -587,6 +589,22 @@ def _build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     sub = p.add_subparsers(dest="command", required=True, metavar="<command>")
+
+    # cvo start
+    p_start = sub.add_parser(
+        "start",
+        help="Guided interactive pipeline (recommended). Walks through CV pick → parse → offer → align.",
+        description="Interactive wizard: pick a CV (path or file dialog), choose to parse it, "
+                    "pick the offer, then run the alignment with a per-experience BEFORE/AFTER view.",
+    )
+    p_start.add_argument("--provider", choices=PROVIDER_ORDER, default=None,
+                         help="LLM provider override (default: $CVO_PROVIDER from .env, or 'claude').")
+    p_start.add_argument("--model", default=None, help="Model override for the active provider.")
+    p_start.add_argument("--output", default="output/cv_optimized.md",
+                         help="Base output path (default: output/cv_optimized.md).")
+    p_start.add_argument("--format", default="md,json",
+                         help="Output formats. Options: md, json, pdf, docx, or 'all'. Default: md,json.")
+    p_start.set_defaults(func=cmd_start)
 
     # cvo run
     p_run = sub.add_parser(

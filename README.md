@@ -85,15 +85,38 @@ you pick.
 
 ## Usage
 
-Three subcommands:
+Four subcommands:
 
 | Command           | Purpose                                                       |
 | ----------------- | ------------------------------------------------------------- |
+| `cvo start`       | **Guided pipeline** — recommended for new users               |
 | `cvo setup`       | Pick provider + paste API key (saves to `.env`)               |
-| `cvo run`         | Full pipeline: CV (PDF or JSON) + offer → optimized CV        |
+| `cvo run`         | Batch pipeline: CV + offer → optimized CV (one-shot, scriptable) |
 | `cvo parse-pdf`   | Parse a CV PDF into the standard JSON (no alignment)          |
 
 Run `cvo --help` or `cvo <command> --help` for the full flag list.
+
+### `cvo start` — guided pipeline
+
+The friendliest way to run cv-optimizer. Walks you through every step:
+
+```bash
+cvo start
+```
+
+What it asks, in order:
+
+1. **Where is your CV?** Three options:
+   - Type the path (with tab autocomplete).
+   - Open a file picker (tkinter, falls back to macOS dialog).
+   - Pick from `data/json/`, `data/pdfs/`, or `data/docx/`.
+2. **Convert it to JSON?** (skipped if the input is already JSON).
+3. **Where is the job offer?** (path or file picker).
+4. **Optimize.** For each experience you'll see a **BEFORE / AFTER**
+   view with the original and rewritten bullets, plus a colored
+   alignment-score bar (0–100).
+
+Override the defaults with `--provider`, `--model`, `--output`, `--format`.
 
 ### `cvo setup` — interactive wizard
 
