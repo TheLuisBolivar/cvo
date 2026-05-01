@@ -111,8 +111,17 @@ class DeepSeekClient:
         )
         for chunk in stream:
             try:
-                delta = chunk.choices[0].delta.content
+                delta_obj = chunk.choices[0].delta
             except (IndexError, AttributeError):
-                delta = None
-            if delta:
-                yield delta
+                continue
+            # Primary: visible answer text.
+            content = getattr(delta_obj, "content", None)
+            if content:
+                yield content
+                continue
+            # Fallback: some DeepSeek (V3 reasoner / V4 thinking) variants
+            # send the answer through `reasoning_content` instead. Yield it
+            # so the parser still has something to work with.
+            reasoning = getattr(delta_obj, "reasoning_content", None)
+            if reasoning:
+                yield reasoning

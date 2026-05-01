@@ -164,19 +164,41 @@ def stream_json(
     """
     Stream a response, parse it as JSON, return the dict.
 
-    If the response can't be parsed (typically because the model hit
-    `max_tokens` and got cut mid-JSON), automatically retry once with
-    double the budget, capped at `max_retry_tokens`. The user sees a
-    `⚠ retrying…` line and a fresh progress bar for the retry.
+    Two failure modes are recovered automatically:
+
+    * **Empty stream** (provider returned 0 chars). Some providers
+      occasionally emit no deltas at all — usually a transient quirk.
+      We fall back to a non-streaming `client.call_json()` which often
+      uses a stricter JSON mode (e.g. DeepSeek's `response_format`).
+
+    * **Truncated stream** (parse fails because JSON ends mid-string).
+      We retry with double the budget (capped at `max_retry_tokens`).
     """
     raw = stream_with_progress(
         client.call_stream(prompt, system=system, max_tokens=max_tokens, temperature=temperature),
         label,
         max_tokens,
     )
+
+    # Empty-stream fallback.
+    if not raw.strip():
+        sys.stdout.write(_c(
+            "  ⚠ stream returned 0 chars — falling back to non-streaming call\n",
+            "33",
+        ))
+        sys.stdout.flush()
+        try:
+            return client.call_json(prompt, system=system, max_tokens=max_tokens, temperature=temperature)
+        except Exception:
+            # Last-ditch retry with bigger budget on the non-streaming path.
+            bigger = min(max_retry_tokens, max_tokens * 2)
+            if bigger > max_tokens:
+                return client.call_json(prompt, system=system, max_tokens=bigger, temperature=temperature)
+            raise
+
     try:
         return _extract_json(raw)
-    except Exception as e:
+    except Exception:
         if not retry_on_truncation or _looks_complete(raw):
             raise
         bigger = min(max_retry_tokens, max_tokens * 2)
@@ -193,6 +215,14 @@ def stream_json(
             f"{label} (retry)",
             bigger,
         )
+        if not raw2.strip():
+            # Stream STILL empty after retry — try non-streaming as a last resort.
+            sys.stdout.write(_c(
+                "  ⚠ retry stream also empty — falling back to non-streaming call\n",
+                "33",
+            ))
+            sys.stdout.flush()
+            return client.call_json(prompt, system=system, max_tokens=bigger, temperature=temperature)
         return _extract_json(raw2)
 
 
@@ -216,8 +246,16 @@ def stream_text(
     label: str,
     temperature: float = 0.5,
 ) -> str:
-    return stream_with_progress(
+    raw = stream_with_progress(
         client.call_stream(prompt, system=system, max_tokens=max_tokens, temperature=temperature),
         label,
         max_tokens,
     ).strip()
+    if raw:
+        return raw
+    sys.stdout.write(_c(
+        "  ⚠ stream returned 0 chars — falling back to non-streaming call\n",
+        "33",
+    ))
+    sys.stdout.flush()
+    return client.call(prompt, system=system, max_tokens=max_tokens, temperature=temperature).strip()
