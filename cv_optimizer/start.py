@@ -21,22 +21,28 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from .aligner import align_experience
-from .analyzer import analyze_offer
+from ._progress import stream_json, stream_text
 from .banner import print_banner
+from .docx_parser import extract_docx_text
 from .exporters import export_all, parse_format_list
-from .docx_parser import parse_docx_to_cv
 from .generator import build_optimized_cv_dict, generate_markdown, generate_report
 from .interactive import open_file_dialog, prompt_path, select
 from .models import CV, Experience
-from .pdf_parser import parse_pdf_to_cv
+from .pdf_parser import extract_pdf_text
+from .prompts import (
+    ALIGNER_PROMPT, ALIGNER_SYSTEM,
+    ANALYZER_PROMPT, ANALYZER_SYSTEM,
+    CV_PARSER_PROMPT, CV_PARSER_SYSTEM,
+    SKILLS_PROMPT, SKILLS_SYSTEM,
+    SUMMARY_PROMPT, SUMMARY_SYSTEM,
+)
 from .providers import (
     has_api_key,
     make_client,
     provider_meta,
 )
 from .setup_wizard import ensure_provider_configured
-from .summary import generate_summary, reorder_skills
+from .summary import _estimate_years, _industries, _tech_match
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -272,11 +278,21 @@ def cmd_start(args: argparse.Namespace) -> int:
         intermediate = _DATA_DIRS["json"] / (cv_path.stem + ".json")
         try:
             if kind == "pdf":
-                cv_dict = parse_pdf_to_cv(cv_path, parser_client, output_path=intermediate)
+                text = extract_pdf_text(cv_path)
             else:
-                cv_dict = parse_docx_to_cv(cv_path, parser_client, output_path=intermediate)
+                text = extract_docx_text(cv_path)
+            _ok(f"Extracted {len(text)} chars of raw text")
+            prompt = CV_PARSER_PROMPT.format(pdf_text=text[:60_000])
+            cv_dict = stream_json(
+                parser_client, prompt, CV_PARSER_SYSTEM,
+                max_tokens=8000, label=f"Parsing {kind.upper()} → JSON", temperature=0.1,
+            )
         except Exception as e:
+            print()
             _err(f"Parsing failed: {e}"); return 1
+
+        intermediate.parent.mkdir(parents=True, exist_ok=True)
+        intermediate.write_text(json.dumps(cv_dict, ensure_ascii=False, indent=2), encoding="utf-8")
         _ok(f"Saved structured JSON to: {intermediate}")
         cv = CV.from_dict(cv_dict)
 
@@ -294,22 +310,41 @@ def cmd_start(args: argparse.Namespace) -> int:
     # ── Step 4 — run the pipeline ──
     _step(4, 4, "Optimize the CV")
 
-    _info("Analyzing offer…")
-    analysis = analyze_offer(offer_text, main_client)
+    analyzer_prompt = ANALYZER_PROMPT.format(offer=offer_text.strip())
+    analysis = stream_json(
+        main_client, analyzer_prompt, ANALYZER_SYSTEM,
+        max_tokens=3000, label="Analyzing offer", temperature=0.2,
+    )
     _ok(f"Position: {analysis.get('position','?')} · seniority: {analysis.get('seniority','?')}")
     _ok(f"hard_skills={len(analysis.get('hard_skills', []))} · ats_keywords={len(analysis.get('ats_keywords', []))}")
 
     print()
-    _info(f"Aligning {len(cv.experiences)} experience(s) — showing BEFORE / AFTER for each:")
+    _info(f"Aligning {len(cv.experiences)} experience(s) — BEFORE / AFTER per experience:")
     aligned: list[dict[str, Any]] = []
     total = len(cv.experiences)
     for i, exp in enumerate(cv.experiences, start=1):
+        achievements_fmt = "\n".join(f"- {a}" for a in exp.achievements) or "(no bullets provided)"
+        techs_fmt = ", ".join(exp.technologies) or "(unspecified)"
+        prompt = ALIGNER_PROMPT.format(
+            company=exp.company, position=exp.position,
+            start_date=exp.start_date, end_date=exp.end_date,
+            location=exp.location or "unspecified",
+            description=exp.description or "(no description provided)",
+            achievements=achievements_fmt, technologies=techs_fmt,
+            offer_analysis=json.dumps(analysis, ensure_ascii=False, indent=2),
+        )
         try:
-            result = align_experience(exp, analysis, main_client)
+            result = stream_json(
+                main_client, prompt, ALIGNER_SYSTEM,
+                max_tokens=2500,
+                label=f"Aligning experience {i}/{total}",
+                temperature=0.2,
+            )
             result["_original_experience"] = exp
             aligned.append(result)
             _print_experience_diff(i, total, exp, result)
         except Exception as e:
+            print()
             _err(f"Experience {i}/{total} failed: {e}")
             aligned.append({
                 "_original_experience": exp,
@@ -322,13 +357,30 @@ def cmd_start(args: argparse.Namespace) -> int:
             })
 
     print()
-    _info("Generating professional summary…")
-    summary = generate_summary(cv, analysis, main_client)
-    _ok("Summary ready.")
+    summary_prompt = SUMMARY_PROMPT.format(
+        current_title=cv.personal_info.get("current_title", ""),
+        original_summary=cv.summary or "(no original summary)",
+        years=_estimate_years(cv),
+        tech_match=", ".join(_tech_match(cv, analysis.get("hard_skills", []))) or "(none explicit)",
+        industries=", ".join(_industries(cv)) or "(unspecified)",
+        target_position=analysis.get("position", ""),
+        seniority=analysis.get("seniority", ""),
+        hard_skills=", ".join(analysis.get("hard_skills", [])),
+        responsibilities=", ".join(analysis.get("key_responsibilities", [])),
+    )
+    summary = stream_text(
+        main_client, summary_prompt, SUMMARY_SYSTEM,
+        max_tokens=400, label="Writing summary", temperature=0.5,
+    )
 
-    _info("Reordering skills…")
-    skills = reorder_skills(cv, analysis, main_client)
-    _ok("Skills reordered.")
+    skills_prompt = SKILLS_PROMPT.format(
+        candidate_skills=json.dumps(cv.skills, ensure_ascii=False, indent=2),
+        offer_hard_skills=json.dumps(analysis.get("hard_skills", []), ensure_ascii=False),
+    )
+    skills = stream_json(
+        main_client, skills_prompt, SKILLS_SYSTEM,
+        max_tokens=1500, label="Reordering skills", temperature=0.2,
+    )
 
     # ── Export ──
     formats = parse_format_list(args.format)
