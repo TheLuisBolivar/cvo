@@ -4,6 +4,8 @@ cvo — cv-optimizer command-line entrypoint.
 Subcommands:
     cvo start        Interactive guided pipeline (recommended for new users)
     cvo run          Full pipeline: CV (PDF or JSON) + offer → optimized CV
+    cvo screen       Pre-screen multiple offers, ranked by deterministic match %
+    cvo gaps         Standalone gap-closing plan (CV vs Offer)
     cvo parse-pdf    Just parse a CV PDF into the standard JSON
     cvo setup        Interactive provider + API-key wizard
 
@@ -60,7 +62,9 @@ from .banner import print_banner
 from .client import _extract_json
 from .deepseek_client import DEFAULT_DEEPSEEK_MODEL
 from .interactive import select
+from .gaps_cli import cmd_gaps
 from .providers import LLMClient, PROVIDER_ORDER
+from .screen import cmd_screen
 from .start import cmd_start
 from .prompts import (
     ALIGNER_PROMPT,
@@ -607,6 +611,40 @@ def _build_parser() -> argparse.ArgumentParser:
     p_start.add_argument("--no-cache", action="store_true",
                          help="Skip the SQLite parse cache; force a fresh PDF/DOCX → JSON parse.")
     p_start.set_defaults(func=cmd_start)
+
+    # cvo screen
+    p_screen = sub.add_parser(
+        "screen",
+        help="Pre-screen multiple job offers against the CV. Ranks by deterministic match %%.",
+        description="Analyze each offer (URL / .txt / .md / .json) and print a "
+                    "ranked table by CV-vs-Offer match. Saves structured offer JSONs "
+                    "to data/offers/. No alignment runs.",
+    )
+    p_screen.add_argument("sources", nargs="*",
+                          help="One or more offer sources: URLs, .txt, .md, or .json files.")
+    p_screen.add_argument("--cv", default=None,
+                          help="CV JSON path (default: auto-detect in data/json/).")
+    p_screen.add_argument("--from-file", default=None,
+                          help="Read offer sources from a file (one per line, # for comments).")
+    p_screen.add_argument("--provider", choices=PROVIDER_ORDER, default=None)
+    p_screen.add_argument("--model", default=None)
+    p_screen.add_argument("--no-followup", action="store_true",
+                          help="Don't print the 'top match → run cvo start' suggestion.")
+    p_screen.set_defaults(func=cmd_screen)
+
+    # cvo gaps
+    p_gaps = sub.add_parser(
+        "gaps",
+        help="Generate an actionable plan to close skill gaps for a target offer.",
+        description="Compute missing skills (CV vs Offer) and produce a Markdown "
+                    "plan: courses, demo projects, time estimates. Uses the LLM.",
+    )
+    p_gaps.add_argument("--cv", default=None, help="CV JSON path (default: auto-detect).")
+    p_gaps.add_argument("--offer", default=None, help="Offer JSON path (default: auto-detect).")
+    p_gaps.add_argument("--output", default="output/cv_gaps.md", help="Markdown output path.")
+    p_gaps.add_argument("--provider", choices=PROVIDER_ORDER, default=None)
+    p_gaps.add_argument("--model", default=None)
+    p_gaps.set_defaults(func=cmd_gaps)
 
     # cvo run
     p_run = sub.add_parser(

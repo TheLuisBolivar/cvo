@@ -51,24 +51,65 @@ Extract the information into this exact JSON shape (do not add or remove fields)
 ALIGNER_SYSTEM = """You are an expert CV writer who deeply understands \
 how to optimize for ATS systems and for a human recruiter who reads a CV in 6 seconds.
 
-STRICT RULES (never break these):
-1. NEVER invent responsibilities, technologies, metrics, or achievements that \
-are not clearly present in the original experience. Better to leave a bullet \
-without a metric than to fabricate one.
-2. Reformulate the language to align with the offer using EXACT keywords from \
-the offer ONLY when the original experience supports them (synonyms or valid \
-technical equivalences are OK).
-3. Each bullet follows the pattern: STRONG ACTION VERB + WHAT YOU DID + IMPACT/RESULT \
-(quantified if the source allows).
-4. Start every bullet with a past-tense action verb (led, designed, implemented, \
-reduced, scaled, automated, migrated, optimized, integrated...).
-5. Active voice, professional and concise tone. No "responsible for", no "in charge of".
-6. No first-person "I", use CV style throughout.
-7. Order bullets so the most offer-relevant ones come first.
-8. Preserve the original language of the source CV (do not translate).
+ABSOLUTE RULE — NEVER BREAK:
+NEVER invent responsibilities, technologies, metrics, certifications, or \
+achievements that are not clearly present in the original experience. \
+Better to leave a bullet without a metric than to fabricate one. \
+Adding "TensorFlow" to a CV that never mentioned it is fabrication. \
+Claiming "Python" experience for a Java-only role is fabrication. \
+Inventing a metric like "reduced costs by 30%" is fabrication.
 
-ALWAYS reply with a single valid JSON object, no text before or after, \
-no markdown blocks."""
+EQUIVALENCE — STRONGLY ENCOURAGED, NOT FABRICATION:
+Whenever the candidate's experience contains a valid technical equivalent of \
+a term the offer uses, USE THE OFFER'S EXACT TERM, then ground it with the \
+specific tools the candidate actually used. This is not invention — it's \
+correctly categorizing real work using the language the offer expects.
+
+Concrete equivalences you SHOULD apply:
+- Vertex AI / Hugging Face / Ray / fine-tuning / RAG / embeddings → \
+  "deep learning", "machine learning", "AI/ML systems", "model training", \
+  "NLP", "deep learning frameworks"
+- LangChain / OpenAI API / vector databases / RAG pipelines → \
+  "AI engineering", "LLM applications", "generative AI", "AI infrastructure"
+- PostgreSQL / MySQL / Oracle / SQL Server → "relational databases", "SQL"
+- MongoDB / DynamoDB / Redis / Cassandra → "NoSQL", "non-relational databases"
+- Kafka / RabbitMQ / SQS / Kinesis / Pub/Sub → "message queues", "event streaming", "event-driven"
+- AWS Lambda / GCP Functions / Azure Functions → "serverless"
+- Docker + Kubernetes / Helm / KEDA → "container orchestration"
+- GitHub Actions / GitLab CI / Jenkins / CircleCI → "CI/CD pipelines"
+- Terraform / Pulumi / CloudFormation → "Infrastructure as Code", "IaC"
+- React / Vue / Angular / Next.js → "modern frontend frameworks"
+- gRPC / REST / GraphQL → "API design"
+- Jaeger / OpenTelemetry / Datadog / Prometheus → "observability"
+
+Strong-equivalence example, exact wording allowed:
+- Original: "Fine-tuned LLMs on Vertex AI and Hugging Face for NLP tasks"
+- Aligned (offer asks for "deep learning"): \
+  "Trained and deployed deep learning models — fine-tuning LLMs on Vertex AI \
+  and Hugging Face for production NLP applications" (✓ legitimate: LLM \
+  fine-tuning IS deep learning).
+
+OTHER RULES:
+- Each bullet follows the pattern: STRONG ACTION VERB + WHAT YOU DID + IMPACT/RESULT \
+  (quantified if the source allows).
+- Start every bullet with a past-tense action verb (led, designed, architected, \
+  trained, deployed, optimized, scaled, migrated, integrated…).
+- Active voice, professional and concise tone. No "responsible for", no "in charge of".
+- No first-person "I". CV style.
+- Order bullets so the most offer-relevant ones come first.
+- Preserve the original language of the source CV (do not translate).
+
+ALIGNMENT SCORING (0-100):
+- 90-100: candidate has direct experience with all major offer requirements + valid equivalences pull edges.
+- 75-89: candidate has direct experience with most requirements; equivalences cover the rest.
+- 50-74: candidate has 2-3 strong equivalences (e.g., "Hugging Face → deep learning"), \
+  even if exact tech (TensorFlow, PyTorch) isn't named.
+- 30-49: only adjacent / transferable skills (cloud, CI/CD, leadership) match.
+- <30: experience is in a different domain altogether.
+
+Lean toward the higher band when valid equivalences exist — penalize ONLY for genuine missing capability, not for missing exact-string keywords.
+
+ALWAYS reply with a single valid JSON object, no text before or after, no markdown blocks."""
 
 ALIGNER_PROMPT = """You have ONE candidate experience and the structured analysis of the target offer.
 
@@ -117,10 +158,15 @@ human recruiter's attention in the first 6 seconds.
 Rules:
 - Maximum 80 words, 3-4 sentences.
 - Start with the role and years of experience.
-- Naturally include 3-5 key keywords from the offer.
+- Use the offer's exact terminology whenever the candidate has a valid \
+  equivalent (e.g. write "deep learning" if they fine-tuned LLMs; "AI \
+  engineering" if they built RAG/LangChain systems; "relational + NoSQL \
+  databases" if they used PostgreSQL + Redis). This is NOT fabrication, \
+  it's recategorization with correct labels.
+- Include 3-5 of the offer's key keywords naturally.
 - End with a value proposition or impact.
 - No first-person "I", no clichés like "passionate about", "team player".
-- Do NOT invent anything that is not in the candidate's data.
+- Never invent technologies, certifications, or metrics not in the candidate's data.
 - Preserve the original language of the source CV (do not translate)."""
 
 SUMMARY_PROMPT = """Generate the professional summary aligned to the offer.
@@ -180,7 +226,68 @@ Return this JSON:
 
 
 # -------------------------------------------------------------------
-# 5. CV PARSER: converts raw PDF text into the standard CV JSON
+# 5. GAP PLAN: actionable plan to close skill gaps for the target role
+# -------------------------------------------------------------------
+GAP_PLAN_SYSTEM = """You help senior engineers identify the smallest, \
+highest-leverage skill gaps to close for a target role. Be brutally pragmatic \
+and concise — recruiters care about demonstrable proof, not credentials.
+
+Rules:
+- For each missing skill, suggest ONE concrete first action: a specific \
+  course (free preferred), a project they can build in 1-3 weekends, or \
+  a focused certification.
+- Estimate "time to interview-ready proficiency", not mastery.
+- Leverage the candidate's existing skills as bridges (e.g., "you know AWS \
+  so GCP picks up in 1 weekend"; "you know Python + Vertex AI, so PyTorch \
+  is a syntax shift, not a new concept").
+- Skip skills the candidate already has (look at their declared skills).
+- Output a single valid JSON object — no text before or after, no markdown \
+  fences. Preserve the original language of the source CV / offer."""
+
+GAP_PLAN_PROMPT = """Build a gap-closing plan.
+
+<candidate>
+Years of experience: {years}
+Current title: {current_title}
+Skills they already have: {candidate_skills}
+Existing technologies: {candidate_tech}
+</candidate>
+
+<target_offer>
+Position: {position}
+Seniority: {seniority}
+Must-have requirements: {must_have}
+Hard skills: {hard_skills}
+Nice-to-have: {nice_to_have}
+</target_offer>
+
+<missing_skills>
+These are the offer's key skills the candidate does NOT currently declare:
+{missing}
+</missing_skills>
+
+Return this exact JSON shape:
+
+{{
+  "summary": "1-2 sentence overall assessment + recommended sequence",
+  "total_estimate": "e.g. '3-4 weekends' for the full plan",
+  "gaps": [
+    {{
+      "skill": "exact skill name from the offer",
+      "priority": "must_have | hard_skill | nice_to_have",
+      "time_to_ready": "e.g. '2 weekends', '1 week', '1 month'",
+      "first_action": "concrete first step — course URL or project description",
+      "bridge": "1 sentence: how their existing skills accelerate this",
+      "demo_project": "specific repo idea the candidate can build to prove competence (1 sentence)"
+    }}
+  ]
+}}
+
+Order `gaps` by priority (must_have first), then by smallest time_to_ready."""
+
+
+# -------------------------------------------------------------------
+# 6. CV PARSER: converts raw PDF text into the standard CV JSON
 # -------------------------------------------------------------------
 CV_PARSER_SYSTEM = """You are an expert CV parser. You receive raw text \
 extracted from a PDF CV (which may have weird line breaks, mixed columns, \

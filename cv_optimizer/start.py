@@ -32,6 +32,7 @@ from .cache import (
 )
 from .docx_parser import extract_docx_text
 from .exporters import export_all, parse_format_list
+from .gaps import generate_gap_plan, render_gap_plan_markdown
 from .generator import build_optimized_cv_dict, generate_markdown, generate_report
 from .interactive import (
     confirm,
@@ -641,6 +642,14 @@ def cmd_start(args: argparse.Namespace) -> int:
         max_tokens=1500, label="Reordering skills", temperature=0.2,
     )
 
+    # ── Gap-closing plan (LLM, ~3000 tokens) ──
+    print()
+    try:
+        plan = generate_gap_plan(cv, offer, main_client)
+    except Exception as e:
+        _warn(f"Gap plan generation failed: {e}")
+        plan = None
+
     # ── Export ──
     formats = parse_format_list(args.format)
     output_path = Path(args.output)
@@ -650,8 +659,12 @@ def cmd_start(args: argparse.Namespace) -> int:
     cv_dict_out = build_optimized_cv_dict(cv, summary, aligned, skills, analysis)
     written = export_all(formats, md, cv_dict_out, output_path)
 
+    # Report = alignment report + gap plan (if any)
+    report_md = generate_report(aligned, skills, analysis)
+    if plan is not None:
+        report_md += "\n" + render_gap_plan_markdown(plan)
     report_path = output_path.with_name(output_path.stem + "_report.md")
-    report_path.write_text(generate_report(aligned, skills, analysis), encoding="utf-8")
+    report_path.write_text(report_md, encoding="utf-8")
 
     print()
     print(_bold("Outputs:"))
